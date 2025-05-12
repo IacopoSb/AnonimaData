@@ -49,7 +49,7 @@ def process_step1():
        
         logger.info(f"Starting first microservice...")
         result = subprocess.run(
-            ["python", "dataAnalyzer/dataAnalyzer.py", filepath, "--output-dir", guid],
+            ["python", "dataAnalyzer/dataAnalyzer.py", filepath, "--output-dir", workingpath],
             capture_output=True,
             text=True,
             check=True
@@ -62,7 +62,6 @@ def process_step1():
         
         # Return metadata as response
         return jsonify({
-            "message": "Step 1 processing completed successfully",
             "metadata": metadata,
             "identifier": guid
         }), 200
@@ -85,7 +84,6 @@ def process_step2(guid):
         return jsonify({"error": "Invalid GUID"}), 400
 
     try:
-        # Fix: Use request.data to get the payload and fix typo in filename
         updated_metadata_file = os.path.join(workingpath, "updated_metadata.csv")
         with open(updated_metadata_file, 'w') as f:
             f.write(request.data.decode('utf-8'))
@@ -96,7 +94,7 @@ def process_step2(guid):
             ["python", "anonymizer/anonymizer.py", 
              "--input", guid + "/structured_data.csv", 
              "--metadata", updated_metadata_file, 
-             "--output-dir", "/app/uploads/" + guid],
+             "--output-dir", os.path.join(workingpath, guid)],
             capture_output=True,
             text=True,
             check=True
