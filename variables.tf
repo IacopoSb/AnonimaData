@@ -1,16 +1,20 @@
 variable "project" {
   description = "ID del progetto GCP"
   type        = string
-  default     = ""
 }
 
 variable "region" {
   description = "Regione GCP in cui distribuire le risorse"
   type        = string
-default     = "europe-central2"
 }
 
-variable "credentials_file" {
-  description = "Percorso al file JSON delle credenziali di Google Cloud"
+variable "db_password" {
+  description = "Password for the Cloud SQL user"
+  type        = string
+  sensitive   = true
+}
+
+variable "vpc_network" {
+  description = "Self link or name of the VPC network for Cloud SQL private IP"
   type        = string
 }
