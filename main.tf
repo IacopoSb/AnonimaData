@@ -247,22 +247,13 @@ resource "google_cloud_run_v2_service_iam_member" "orchestratore_public" {
   member   = "allUsers"
 }
 
-# IAM: Frontend pubblico (commentato, decommentare quando necessario)
+# IAM: Frontend pubblico (TODO manca il docker, da decommentare quando lo avremo...)
 # resource "google_cloud_run_v2_service_iam_member" "frontend_public" {
 #   location = google_cloud_run_v2_service.frontend.location
 #   name     = google_cloud_run_v2_service.frontend.name
 #   role     = "roles/run.invoker"
 #   member   = "allUsers"
 # }
-
-# Permessi minimi per Storage (solo se necessario)
-resource "google_project_iam_member" "app_storage_access" {
-  project = var.project
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.app_service_account.email}"
-  
-  count = 1
-}
 
 # Output URLs
 output "frontend_url" {
