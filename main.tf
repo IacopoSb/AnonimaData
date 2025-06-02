@@ -13,6 +13,37 @@ provider "google" {
   region  = var.region
 }
 
+# Abilita le API necessarie
+resource "google_project_service" "servicenetworking" {
+  service = "servicenetworking.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "sqladmin" {
+  service = "sqladmin.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "run" {
+  service = "run.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "vpcaccess" {
+  service = "vpcaccess.googleapis.com"
+  disable_on_destroy = false
+}
+
+# VPC Connector per Cloud Run
+resource "google_vpc_access_connector" "connector" {
+  name          = "vpc-connector"
+  ip_cidr_range = "10.8.0.0/28"
+  network       = var.vpc_network
+  region        = var.region
+  
+  depends_on = [google_project_service.vpcaccess]
+}
+
 # VPC Peering per Cloud SQL Private IP
 resource "google_compute_global_address" "private_ip_address" {
   name          = "sql-private-ip"
@@ -20,13 +51,19 @@ resource "google_compute_global_address" "private_ip_address" {
   address_type  = "INTERNAL"
   prefix_length = 16
   network       = var.vpc_network
+  
+  depends_on = [google_project_service.servicenetworking]
 }
 
 resource "google_service_networking_connection" "private_vpc_connection" {
   network                 = var.vpc_network
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_address.name]
-  depends_on              = [google_compute_global_address.private_ip_address]
+  
+  depends_on = [
+    google_compute_global_address.private_ip_address,
+    google_project_service.servicenetworking
+  ]
 }
 
 # Bucket per file CSV
@@ -52,7 +89,10 @@ resource "google_sql_database_instance" "main_db" {
     }
   }
 
-  depends_on = [google_service_networking_connection.private_vpc_connection]
+  depends_on = [
+    google_service_networking_connection.private_vpc_connection,
+    google_project_service.sqladmin
+  ]
 }
 
 resource "google_sql_database" "db" {
@@ -66,32 +106,23 @@ resource "google_sql_user" "users" {
   password = var.db_password
 }
 
-# Service Account per l'orchestratore (deve essere creato prima dei servizi)
-resource "google_service_account" "orchestratore_invoker" {
-  account_id   = "orchestratore-invoker"
-  display_name = "Orchestratore Cloud Run Invoker"
+# Service Account base (senza permessi speciali)
+resource "google_service_account" "app_service_account" {
+  account_id   = "anonidata-app"
+  display_name = "AnoniData Application Service Account"
 }
 
-# Permessi per il service account di accedere a Cloud SQL e Storage
-resource "google_project_iam_member" "orchestratore_sql_client" {
-  project = var.project
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.orchestratore_invoker.email}"
-}
-
-resource "google_project_iam_member" "orchestratore_storage_admin" {
-  project = var.project
-  role    = "roles/storage.admin"
-  member  = "serviceAccount:${google_service_account.orchestratore_invoker.email}"
-}
-
-# Cloud Run Servizio Anonymizer
+# Cloud Run Servizio Anonymizer (interno, no auth)
 resource "google_cloud_run_v2_service" "anonymizer" {
   name     = "anonymizer"
   location = var.region
 
   template {
-    service_account = google_service_account.orchestratore_invoker.email
+    service_account = google_service_account.app_service_account.email
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "ALL_TRAFFIC"
+    }
     containers {
       image = "gcr.io/${var.project}/anonymizer:latest"
       resources {
@@ -102,15 +133,21 @@ resource "google_cloud_run_v2_service" "anonymizer" {
       }
     }
   }
+  
+  depends_on = [google_project_service.run]
 }
 
-# Cloud Run Servizio Formatter
+# Cloud Run Servizio Formatter (interno, no auth)
 resource "google_cloud_run_v2_service" "formatter" {
   name     = "formatter"
   location = var.region
 
   template {
-    service_account = google_service_account.orchestratore_invoker.email
+    service_account = google_service_account.app_service_account.email
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "ALL_TRAFFIC"
+    }
     containers {
       image = "gcr.io/${var.project}/formatter:latest"
       resources {
@@ -121,14 +158,20 @@ resource "google_cloud_run_v2_service" "formatter" {
       }
     }
   }
+  
+  depends_on = [google_project_service.run]
 }
 
-# Cloud Run Frontend (commentato ma pronto per il futuro)
+# Cloud Run Frontend (privato per ora)
 resource "google_cloud_run_v2_service" "frontend" {
   name     = "frontend"
   location = var.region
 
   template {
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "ALL_TRAFFIC"
+    }
     containers {
       image = "gcr.io/${var.project}/frontend:latest"
       env {
@@ -151,12 +194,28 @@ resource "google_cloud_run_v2_service" "orchestratore" {
   location = var.region
 
   template {
-    service_account = google_service_account.orchestratore_invoker.email
+    service_account = google_service_account.app_service_account.email
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "ALL_TRAFFIC"
+    }
     containers {
       image = "gcr.io/${var.project}/orchestratore:latest"
       env {
-        name  = "DB_CONNECTION_STRING"
-        value = "postgresql://${google_sql_user.users.name}:${var.db_password}@/appdb?host=/cloudsql/${google_sql_database_instance.main_db.connection_name}"
+        name  = "DB_HOST"
+        value = google_sql_database_instance.main_db.private_ip_address
+      }
+      env {
+        name  = "DB_NAME"
+        value = google_sql_database.db.name
+      }
+      env {
+        name  = "DB_USER"
+        value = google_sql_user.users.name
+      }
+      env {
+        name  = "DB_PASSWORD"
+        value = var.db_password
       }
       env {
         name  = "FORMATTER_URL"
@@ -177,13 +236,10 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         }
       }
     }
-    annotations = {
-      "run.googleapis.com/cloudsql-instances" = google_sql_database_instance.main_db.connection_name
-    }
   }
 }
 
-# IAM: Orchestratore è pubblico
+# IAM: Solo l'orchestratore è pubblico
 resource "google_cloud_run_v2_service_iam_member" "orchestratore_public" {
   location = google_cloud_run_v2_service.orchestratore.location
   name     = google_cloud_run_v2_service.orchestratore.name
@@ -199,19 +255,13 @@ resource "google_cloud_run_v2_service_iam_member" "orchestratore_public" {
 #   member   = "allUsers"
 # }
 
-# IAM: Anonymizer e Formatter sono invocabili solo dall'orchestratore
-resource "google_cloud_run_v2_service_iam_member" "anonymizer_invoker" {
-  location = google_cloud_run_v2_service.anonymizer.location
-  name     = google_cloud_run_v2_service.anonymizer.name
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.orchestratore_invoker.email}"
-}
-
-resource "google_cloud_run_v2_service_iam_member" "formatter_invoker" {
-  location = google_cloud_run_v2_service.formatter.location
-  name     = google_cloud_run_v2_service.formatter.name
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.orchestratore_invoker.email}"
+# Permessi minimi per Storage (solo se necessario)
+resource "google_project_iam_member" "app_storage_access" {
+  project = var.project
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.app_service_account.email}"
+  
+  count = 1
 }
 
 # Output URLs
@@ -237,6 +287,10 @@ output "formatter_url" {
 
 output "db_instance_connection_name" {
   value = google_sql_database_instance.main_db.connection_name
+}
+
+output "db_private_ip" {
+  value = google_sql_database_instance.main_db.private_ip_address
 }
 
 output "db_user" {
