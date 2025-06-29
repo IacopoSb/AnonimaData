@@ -111,23 +111,78 @@ resource "google_sql_user" "users" {
   password = var.db_password
 }
 
-# Service Account base (senza permessi speciali)
-resource "google_service_account" "app_service_account" {
-  account_id   = "anonidata-app"
-  display_name = "AnoniData Application Service Account"
+# Service Accounts
+resource "google_service_account" "orchestratore_service_account" {
+  account_id   = "anonidata-orchestratore"
+  display_name = "AnoniData Orchestratore Service Account"
 }
 
-# IAM per Pub/Sub
-resource "google_project_iam_member" "pubsub_publisher" {
+resource "google_service_account" "frontend_service_account" {
+  account_id   = "anonidata-frontend"
+  display_name = "AnoniData Frontend Service Account"
+}
+
+resource "google_service_account" "anonymizer_service_account" {
+  account_id   = "anonidata-anonymizer"
+  display_name = "AnoniData Anonymizer Service Account"
+}
+
+resource "google_service_account" "formatter_service_account" {
+  account_id   = "anonidata-formatter"
+  display_name = "AnoniData Formatter Service Account"
+}
+
+# IAM per orchestratore (pubsub, storage, cloudsql)
+resource "google_project_iam_member" "orchestratore_pubsub_publisher" {
   project = var.project
   role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:${google_service_account.app_service_account.email}"
+  member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
-
-resource "google_project_iam_member" "pubsub_subscriber" {
+resource "google_project_iam_member" "orchestratore_pubsub_subscriber" {
   project = var.project
   role    = "roles/pubsub.subscriber"
-  member  = "serviceAccount:${google_service_account.app_service_account.email}"
+  member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
+}
+resource "google_project_iam_member" "orchestratore_storage" {
+  project = var.project
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
+}
+resource "google_project_iam_member" "orchestratore_cloudsql" {
+  project = var.project
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
+}
+
+# IAM per formatter (pubsub)
+resource "google_project_iam_member" "formatter_pubsub_publisher" {
+  project = var.project
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.formatter_service_account.email}"
+}
+resource "google_project_iam_member" "formatter_pubsub_subscriber" {
+  project = var.project
+  role    = "roles/pubsub.subscriber"
+  member  = "serviceAccount:${google_service_account.formatter_service_account.email}"
+}
+
+# IAM per anonymizer (pubsub)
+resource "google_project_iam_member" "anonymizer_pubsub_publisher" {
+  project = var.project
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
+}
+resource "google_project_iam_member" "anonymizer_pubsub_subscriber" {
+  project = var.project
+  role    = "roles/pubsub.subscriber"
+  member  = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
+}
+
+# IAM per frontend (solo invocazione orchestratore, se serve aggiungi altro)
+resource "google_project_iam_member" "frontend_run_invoker" {
+  project = var.project
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.frontend_service_account.email}"
 }
 
 # === Pub/Sub Topics e Subscription per orchestrazione servizi ===
@@ -178,7 +233,7 @@ resource "google_cloud_run_v2_service" "anonymizer" {
   location = var.region
 
   template {
-    service_account = google_service_account.app_service_account.email
+    service_account = google_service_account.anonymizer_service_account.email
     vpc_access {
       connector = google_vpc_access_connector.connector.id
       egress    = "ALL_TRAFFIC"
@@ -211,7 +266,7 @@ resource "google_cloud_run_v2_service" "formatter" {
   location = var.region
 
   template {
-    service_account = google_service_account.app_service_account.email
+    service_account = google_service_account.formatter_service_account.email
     vpc_access {
       connector = google_vpc_access_connector.connector.id
       egress    = "ALL_TRAFFIC"
@@ -238,12 +293,13 @@ resource "google_cloud_run_v2_service" "formatter" {
   depends_on = [google_project_service.run]
 }
 
-# Cloud Run Frontend (privato per ora)
+# Cloud Run Frontend
 resource "google_cloud_run_v2_service" "frontend" {
   name     = "frontend"
   location = var.region
 
   template {
+    service_account = google_service_account.frontend_service_account.email
     vpc_access {
       connector = google_vpc_access_connector.connector.id
       egress    = "ALL_TRAFFIC"
@@ -270,7 +326,7 @@ resource "google_cloud_run_v2_service" "orchestratore" {
   location = var.region
 
   template {
-    service_account = google_service_account.app_service_account.email
+    service_account = google_service_account.orchestratore_service_account.email
     vpc_access {
       connector = google_vpc_access_connector.connector.id
       egress    = "ALL_TRAFFIC"
@@ -331,21 +387,6 @@ resource "google_cloud_run_v2_service" "orchestratore" {
   }
 }
 
-# IAM: Solo l'orchestratore è pubblico
-resource "google_cloud_run_v2_service_iam_member" "orchestratore_public" {
-  location = google_cloud_run_v2_service.orchestratore.location
-  name     = google_cloud_run_v2_service.orchestratore.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-# IAM: Frontend pubblico (TODO manca il docker, da decommentare quando lo avremo...)
-# resource "google_cloud_run_v2_service_iam_member" "frontend_public" {
-#   location = google_cloud_run_v2_service.frontend.location
-#   name     = google_cloud_run_v2_service.frontend.name
-#   role     = "roles/run.invoker"
-#   member   = "allUsers"
-# }
 
 # Output URLs
 output "frontend_url" {
