@@ -34,13 +34,18 @@ resource "google_project_service" "vpcaccess" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "pubsub" {
+  service = "pubsub.googleapis.com"
+  disable_on_destroy = false
+}
+
 # VPC Connector per Cloud Run
 resource "google_vpc_access_connector" "connector" {
   name          = "vpc-connector"
   ip_cidr_range = "10.8.0.0/28"
   network       = var.vpc_network
   region        = var.region
-  
+
   depends_on = [google_project_service.vpcaccess]
 }
 
@@ -51,7 +56,7 @@ resource "google_compute_global_address" "private_ip_address" {
   address_type  = "INTERNAL"
   prefix_length = 16
   network       = var.vpc_network
-  
+
   depends_on = [google_project_service.servicenetworking]
 }
 
@@ -59,7 +64,7 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   network                 = var.vpc_network
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_address.name]
-  
+
   depends_on = [
     google_compute_global_address.private_ip_address,
     google_project_service.servicenetworking
@@ -112,6 +117,61 @@ resource "google_service_account" "app_service_account" {
   display_name = "AnoniData Application Service Account"
 }
 
+# IAM per Pub/Sub
+resource "google_project_iam_member" "pubsub_publisher" {
+  project = var.project
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.app_service_account.email}"
+}
+
+resource "google_project_iam_member" "pubsub_subscriber" {
+  project = var.project
+  role    = "roles/pubsub.subscriber"
+  member  = "serviceAccount:${google_service_account.app_service_account.email}"
+}
+
+# === Pub/Sub Topics e Subscription per orchestrazione servizi ===
+
+# Orchestratore -> Formatter
+resource "google_pubsub_topic" "formatter_input" {
+  name = "formatter-input-topic"
+  depends_on = [google_project_service.pubsub]
+}
+resource "google_pubsub_subscription" "formatter_input_sub" {
+  name  = "formatter-input-sub"
+  topic = google_pubsub_topic.formatter_input.name
+}
+
+# Formatter -> Orchestratore
+resource "google_pubsub_topic" "formatter_output" {
+  name = "formatter-output-topic"
+  depends_on = [google_project_service.pubsub]
+}
+resource "google_pubsub_subscription" "formatter_output_sub" {
+  name  = "formatter-output-sub"
+  topic = google_pubsub_topic.formatter_output.name
+}
+
+# Orchestratore -> Anonymizer
+resource "google_pubsub_topic" "anonymizer_input" {
+  name = "anonymizer-input-topic"
+  depends_on = [google_project_service.pubsub]
+}
+resource "google_pubsub_subscription" "anonymizer_input_sub" {
+  name  = "anonymizer-input-sub"
+  topic = google_pubsub_topic.anonymizer_input.name
+}
+
+# Anonymizer -> Orchestratore
+resource "google_pubsub_topic" "anonymizer_output" {
+  name = "anonymizer-output-topic"
+  depends_on = [google_project_service.pubsub]
+}
+resource "google_pubsub_subscription" "anonymizer_output_sub" {
+  name  = "anonymizer-output-sub"
+  topic = google_pubsub_topic.anonymizer_output.name
+}
+
 # Cloud Run Servizio Anonymizer (interno, no auth)
 resource "google_cloud_run_v2_service" "anonymizer" {
   name     = "anonymizer"
@@ -125,6 +185,14 @@ resource "google_cloud_run_v2_service" "anonymizer" {
     }
     containers {
       image = "gcr.io/${var.project}/anonymizer:latest"
+      env {
+        name  = "INPUT_SUBSCRIPTION"
+        value = google_pubsub_subscription.anonymizer_input_sub.name
+      }
+      env {
+        name  = "OUTPUT_TOPIC"
+        value = google_pubsub_topic.anonymizer_output.name
+      }
       resources {
         limits = {
           memory = "512Mi"
@@ -133,7 +201,7 @@ resource "google_cloud_run_v2_service" "anonymizer" {
       }
     }
   }
-  
+
   depends_on = [google_project_service.run]
 }
 
@@ -150,6 +218,14 @@ resource "google_cloud_run_v2_service" "formatter" {
     }
     containers {
       image = "gcr.io/${var.project}/formatter:latest"
+      env {
+        name  = "INPUT_SUBSCRIPTION"
+        value = google_pubsub_subscription.formatter_input_sub.name
+      }
+      env {
+        name  = "OUTPUT_TOPIC"
+        value = google_pubsub_topic.formatter_output.name
+      }
       resources {
         limits = {
           memory = "512Mi"
@@ -158,7 +234,7 @@ resource "google_cloud_run_v2_service" "formatter" {
       }
     }
   }
-  
+
   depends_on = [google_project_service.run]
 }
 
@@ -218,16 +294,32 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         value = var.db_password
       }
       env {
+        name  = "BUCKET_NAME"
+        value = google_storage_bucket.csv_bucket.name
+      }
+      env {
+        name  = "FORMATTER_INPUT_TOPIC"
+        value = google_pubsub_topic.formatter_input.name
+      }
+      env {
+        name  = "FORMATTER_OUTPUT_SUB"
+        value = google_pubsub_subscription.formatter_output_sub.name
+      }
+      env {
+        name  = "ANONYMIZER_INPUT_TOPIC"
+        value = google_pubsub_topic.anonymizer_input.name
+      }
+      env {
+        name  = "ANONYMIZER_OUTPUT_SUB"
+        value = google_pubsub_subscription.anonymizer_output_sub.name
+      }
+      env {
         name  = "FORMATTER_URL"
         value = google_cloud_run_v2_service.formatter.uri
       }
       env {
         name  = "ANONYMIZER_URL"
         value = google_cloud_run_v2_service.anonymizer.uri
-      }
-      env {
-        name  = "BUCKET_NAME"
-        value = google_storage_bucket.csv_bucket.name
       }
       resources {
         limits = {
