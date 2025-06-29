@@ -12,5 +12,5 @@ COPY . .
 # Espone la porta usata da uvicorn
 EXPOSE 5000
 
-# Comando per avviare il server FastAPI
-CMD ["main:app"]
+# Comando per avviare il server Flask
+CMD ["python", "app.py"]

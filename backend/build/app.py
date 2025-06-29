@@ -159,10 +159,11 @@ def anonymize_data():
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
     file_path = os.path.join(app.config['ANONYMIZED_FOLDER'], filename)
+    logger.info(f"Attempting to download file: {file_path}")
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     else:
         return jsonify({"error": "File not found"}), 404
 
 if __name__ == '__main__':
-    app.run(debug=True) # debug=True for development, turn off in production
+    app.run(host='0.0.0.0', debug=False) # debug=True for development, turn off in production
