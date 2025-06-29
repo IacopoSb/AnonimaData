@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonymization Tool</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 900px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        .section { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 5px; background-color: #f9f9f9; }
+        h2 { color: #333; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="file"], input[type="number"], select {
+            width: calc(100% - 22px);
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background-color: #0056b3; }
+        .column-selection-grid {
+            display: grid;
+            grid-template-columns: 1fr 100px 100px; /* Column Name | QI | Anonymize */
+            gap: 10px;
+            margin-top: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+            font-weight: bold;
+        }
+        .column-item {
+            display: grid;
+            grid-template-columns: 1fr 100px 100px;
+            gap: 10px;
+            padding: 5px 0;
+            border-bottom: 1px dotted #eee;
+            align-items: center;
+        }
+        .column-item:last-child { border-bottom: none; }
+        .hidden { display: none; }
+        .message { margin-top: 20px; padding: 10px; border-radius: 4px; }
+        .success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Dataset Anonymization Tool</h1>
+
+        <div class="section">
+            <h2>1. Upload Dataset</h2>
+            <label for="datasetFile">Select Dataset (CSV, Excel, JSON, TXT):</label>
+            <input type="file" id="datasetFile" name="datasetFile" accept=".csv, .xlsx, .xls, .json, .txt">
+            <button onclick="uploadAndAnalyze()">Upload & Analyze</button>
+            <div id="uploadMessage" class="message hidden"></div>
+        </div>
+
+        <div id="columnSelectionSection" class="section hidden">
+            <h2>2. Configure Columns</h2>
+            <p>Review detected column types and select Quasi-Identifiers (QI) and columns to anonymize.</p>
+            <div class="column-selection-grid">
+                <span>Column Name (Type)</span>
+                <span>Is QI?</span>
+                <span>Anonymize?</span>
+            </div>
+            <div id="columnList">
+                </div>
+        </div>
+
+        <div id="anonymizationMethodSection" class="section hidden">
+            <h2>3. Select Anonymization Method</h2>
+            <label for="anonymizationMethod">Choose Method:</label>
+            <select id="anonymizationMethod" onchange="displayMethodParameters()">
+                <option value="k-anonymity">k-Anonymity</option>
+                <option value="l-diversity">l-Diversity</option>
+                <option value="differential-privacy">Differential Privacy</option>
+            </select>
+
+            <div id="methodParameters">
+                </div>
+            
+            <button onclick="startAnonymization()">Start Anonymization</button>
+            <div id="anonymizationMessage" class="message hidden"></div>
+            <div id="downloadLinks"></div>
+        </div>
+    </div>
+
+    <script>
+        let globalMetadata = [];
+        let tempFileName = ''; // To store the temporary file path from the backend
+
+        async function uploadAndAnalyze() {
+            const fileInput = document.getElementById('datasetFile');
+            const file = fileInput.files[0];
+            const uploadMessage = document.getElementById('uploadMessage');
+            uploadMessage.classList.add('hidden');
+
+            if (!file) {
+                uploadMessage.textContent = 'Please select a file.';
+                uploadMessage.classList.add('error');
+                uploadMessage.classList.remove('hidden');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload_and_analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    uploadMessage.textContent = result.message;
+                    uploadMessage.classList.remove('error');
+                    uploadMessage.classList.add('success');
+                    uploadMessage.classList.remove('hidden');
+
+                    globalMetadata = result.metadata.map(col => ({
+                        ...col,
+                        is_quasi_identifier: false, // Default to false
+                        should_anonymize: true      // Default to true
+                    }));
+                    tempFileName = result.temp_filename; // Store the temp filename
+
+                    populateColumnSelection();
+                    document.getElementById('columnSelectionSection').classList.remove('hidden');
+                    document.getElementById('anonymizationMethodSection').classList.remove('hidden');
+                    displayMethodParameters(); // Show default parameters
+                } else {
+                    uploadMessage.textContent = `Error: ${result.error}`;
+                    uploadMessage.classList.add('error');
+                    uploadMessage.classList.remove('success');
+                    uploadMessage.classList.remove('hidden');
+                }
+            } catch (error) {
+                uploadMessage.textContent = `Network error: ${error.message}`;
+                uploadMessage.classList.add('error');
+                uploadMessage.classList.remove('success');
+                uploadMessage.classList.remove('hidden');
+            }
+        }
+
+        function populateColumnSelection() {
+            const columnListDiv = document.getElementById('columnList');
+            columnListDiv.innerHTML = ''; // Clear previous entries
+
+            globalMetadata.forEach((col, index) => {
+                const colItem = document.createElement('div');
+                colItem.classList.add('column-item');
+
+                const colNameSpan = document.createElement('span');
+                colNameSpan.textContent = `${col.column_name} (${col.data_type})`;
+                colItem.appendChild(colNameSpan);
+
+                const qiCheckbox = document.createElement('input');
+                qiCheckbox.type = 'checkbox';
+                qiCheckbox.id = `qi-${index}`;
+                qiCheckbox.checked = col.is_quasi_identifier;
+                qiCheckbox.onchange = (e) => {
+                    globalMetadata[index].is_quasi_identifier = e.target.checked;
+                };
+                const qiLabel = document.createElement('label');
+                qiLabel.htmlFor = `qi-${index}`;
+                qiLabel.textContent = 'QI'; // Label is just for positioning, checkbox provides interaction
+                colItem.appendChild(qiCheckbox);
+
+                const anonCheckbox = document.createElement('input');
+                anonCheckbox.type = 'checkbox';
+                anonCheckbox.id = `anon-${index}`;
+                anonCheckbox.checked = col.should_anonymize;
+                anonCheckbox.onchange = (e) => {
+                    globalMetadata[index].should_anonymize = e.target.checked;
+                };
+                const anonLabel = document.createElement('label');
+                anonLabel.htmlFor = `anon-${index}`;
+                anonLabel.textContent = 'Anonymize'; // Label for positioning
+                colItem.appendChild(anonCheckbox);
+
+                columnListDiv.appendChild(colItem);
+            });
+        }
+
+        function displayMethodParameters() {
+            const method = document.getElementById('anonymizationMethod').value;
+            const paramsDiv = document.getElementById('methodParameters');
+            paramsDiv.innerHTML = ''; // Clear previous parameters
+
+            if (method === 'k-anonymity') {
+                paramsDiv.innerHTML = `
+                    <label for="kValue">k-Value (e.g., 3):</label>
+                    <input type="number" id="kValue" value="3" min="1">
+                `;
+            } else if (method === 'l-diversity') {
+                paramsDiv.innerHTML = `
+                    <label for="kValue">k-Value (e.g., 3):</label>
+                    <input type="number" id="kValue" value="3" min="1">
+                    <label for="lValue">l-Value (e.g., 2):</label>
+                    <input type="number" id="lValue" value="2" min="1">
+                `;
+            } else if (method === 'differential-privacy') {
+                paramsDiv.innerHTML = `
+                    <label for="epsilonValue">Epsilon (e.g., 1.0, smaller is more private):</label>
+                    <input type="number" id="epsilonValue" value="1.0" min="0.01" step="0.01">
+                `;
+            }
+        }
+
+        async function startAnonymization() {
+            const anonymizationMessage = document.getElementById('anonymizationMessage');
+            anonymizationMessage.classList.add('hidden');
+            document.getElementById('downloadLinks').innerHTML = ''; // Clear previous links
+
+            const method = document.getElementById('anonymizationMethod').value;
+            const params = {};
+
+            if (method === 'k-anonymity' || method === 'l-diversity') {
+                params.k = parseInt(document.getElementById('kValue').value);
+            }
+            if (method === 'l-diversity') {
+                params.l = parseInt(document.getElementById('lValue').value);
+            }
+            if (method === 'differential-privacy') {
+                params.epsilon = parseFloat(document.getElementById('epsilonValue').value);
+            }
+
+            // Prepare user selections for QI and anonymization
+            const userSelections = globalMetadata.map(col => ({
+                column_name: col.column_name,
+                is_quasi_identifier: col.is_quasi_identifier,
+                should_anonymize: col.should_anonymize
+            }));
+
+            const payload = {
+                temp_filename: tempFileName,
+                method: method,
+                params: params,
+                user_selections: userSelections
+            };
+
+            try {
+                const response = await fetch('/anonymize', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    anonymizationMessage.textContent = result.message;
+                    anonymizationMessage.classList.remove('error');
+                    anonymizationMessage.classList.add('success');
+                    anonymizationMessage.classList.remove('hidden');
+
+                    const downloadLinksDiv = document.getElementById('downloadLinks');
+                    downloadLinksDiv.innerHTML = `
+                        <p>Download your anonymized data:</p>
+                        <a href="${result.download_url}" target="_blank" download>Full Anonymized Data</a><br>
+                        <a href="${result.sample_download_url}" target="_blank" download>Anonymized Data Sample (First 10 rows)</a>
+                    `;
+                } else {
+                    anonymizationMessage.textContent = `Error: ${result.error}`;
+                    anonymizationMessage.classList.add('error');
+                    anonymizationMessage.classList.remove('success');
+                    anonymizationMessage.classList.remove('hidden');
+                }
+            } catch (error) {
+                anonymizationMessage.textContent = `Network error: ${error.message}`;
+                anonymizationMessage.classList.add('error');
+                anonymizationMessage.classList.remove('success');
+                anonymizationMessage.classList.remove('hidden');
+            }
+        }
+
+        // Initialize parameters display on page load
+        document.addEventListener('DOMContentLoaded', displayMethodParameters);
+    </script>
+</body>
+</html>

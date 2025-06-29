@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Espone la porta usata da uvicorn
-EXPOSE 8080
+EXPOSE 5000
 
 # Comando per avviare il server FastAPI
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["main:app"]
