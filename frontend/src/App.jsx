@@ -31,15 +31,16 @@ const anonymizationAlgorithms = [
       { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
     ]
   },
-  { 
-    id: 't-closeness', 
-    name: 'T-Closeness', 
-    description: 'Distribution of sensitive attribute in each group close to overall distribution',
-    params: [
-      { name: 't', type: 'number', min: 0.1, max: 1, step: 0.1, default: 0.3, description: 'Closeness threshold' },
-      { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
-    ]
-  },
+  // T-CLONESESS is not implemented yet
+  // { 
+  //   id: 't-closeness', 
+  //   name: 'T-Closeness', 
+  //   description: 'Distribution of sensitive attribute in each group close to overall distribution',
+  //   params: [
+  //     { name: 't', type: 'number', min: 0.1, max: 1, step: 0.1, default: 0.3, description: 'Closeness threshold' },
+  //     { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
+  //   ]
+  // },
   { 
     id: 'differential-privacy', 
     name: 'Differential Privacy', 
@@ -527,7 +528,7 @@ const AnonimaData = () => {
                 {selectedAlgorithm && (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Parameters</h3>
-                    
+                    {/* TODO: da rivedere per tabelle di parametri in input */}
                     {anonymizationAlgorithms.find(a => a.id === selectedAlgorithm)?.params.map((param) => (
                       <div key={param.name} className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -679,12 +680,13 @@ const AnonimaData = () => {
                 </div>
 
                 <div className="flex gap-4 justify-center">
-                  <button 
+                  {/* Missing in our workflow, not implemented */}
+                  {/* <button 
                     onClick={() => setCurrentView('configure')}
                     className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
                   >
                     Reconfigure
-                  </button>
+                  </button> */}
                   <button 
                     onClick={handleSave}
                     className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2"
