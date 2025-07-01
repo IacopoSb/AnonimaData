@@ -3,12 +3,12 @@ import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, Alert
 
 // Firebase configuration - Replace with your actual config
 const firebaseConfig = {
-  apiKey: "your-api-key",
-  authDomain: "your-project-firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "your-app-id"
+  apiKey: "AIzaSyBywCwoGMhnmuNfFzuQ2NcSI0ivt_opirc",
+  authDomain: "anonimadata-5405f.firebaseapp.com",
+  projectId: "anonimadata-5405f",
+  storageBucket: "anonimadata-5405f.firebasestorage.app",
+  messagingSenderId: "88124831813",
+  appId: "1:88124831813:web:a79061b890c47f322c4b2c"
 };
 
 // Firebase will be loaded from CDN - we'll initialize it in useEffect
