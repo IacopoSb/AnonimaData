@@ -3,12 +3,12 @@ import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, Alert
 
 // Firebase configuration - Replace with your actual config
 const firebaseConfig = {
-  apiKey: "AIzaSyBywCwoGMhnmuNfFzuQ2NcSI0ivt_opirc",
-  authDomain: "anonimadata-5405f.firebaseapp.com",
-  projectId: "anonimadata-5405f",
-  storageBucket: "anonimadata-5405f.firebasestorage.app",
-  messagingSenderId: "88124831813",
-  appId: "1:88124831813:web:a79061b890c47f322c4b2c"
+  apiKey: "AIzaSyA4coFZ1hQkJAdMcSVIpbWgZ3Fa99knxz4",
+  authDomain: "gruppo-3-456912.firebaseapp.com",
+  projectId: "gruppo-3-456912",
+  storageBucket: "gruppo-3-456912.firebasestorage.app",
+  messagingSenderId: "614401261394",
+  appId: "1:614401261394:web:459f56b903f80d4df9848b"
 };
 
 // Firebase will be loaded from CDN - we'll initialize it in useEffect
