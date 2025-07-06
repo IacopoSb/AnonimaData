@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, AlertCircle, Clock, Database, FileText } from 'lucide-react';
+import { uploadFile, getFiles, anonymizeData, downloadFile } from './api';
 
-// Firebase configuration - Replace with your actual config
+
+
+// Firebase configuration 
 const firebaseConfig = {
   apiKey: "AIzaSyA4coFZ1hQkJAdMcSVIpbWgZ3Fa99knxz4",
   authDomain: "gruppo-3-456912.firebaseapp.com",
@@ -31,7 +34,7 @@ const anonymizationAlgorithms = [
       { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
     ]
   },
-  // T-CLONESESS is not implemented yet
+  // T-CLONESESS is not implemented 
   // { 
   //   id: 't-closeness', 
   //   name: 'T-Closeness', 
@@ -63,6 +66,11 @@ const AnonimaData = () => {
   const [processingStatus, setProcessingStatus] = useState('idle');
   const [datasets, setDatasets] = useState([]);
   const [columnConfig, setColumnConfig] = useState({});
+  const [stats, setStats] = useState({
+  totalDatasets: 0,
+  completedJobs: 0,
+  dataProtected: 0
+  });
 
   // Load Firebase SDK and initialize
   useEffect(() => {
@@ -91,6 +99,7 @@ const AnonimaData = () => {
                     avatar: user.photoURL
                   });
                   setCurrentView('dashboard');
+                  loadStats();
                 } else {
                   setUser(null);
                   setCurrentView('login');
@@ -168,22 +177,30 @@ const AnonimaData = () => {
   };
 
   // File upload handler
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
-      setUploadedFile(file);
-      // Mock data preview
+  const handleFileUpload = async (event) => {
+  const file = event.target.files[0];
+
+  if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
+    setUploadedFile(file);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await uploadFile(formData);
+
       setDataPreview({
-        columns: ['id', 'name', 'age', 'city', 'salary'],
-        rows: [
-          ['1', 'Mario Rossi', '35', 'Roma', '45000'],
-          ['2', 'Anna Verdi', '28', 'Milano', '52000'],
-          ['3', 'Luigi Bianchi', '42', 'Napoli', '38000']
-        ]
+        columns: response.colonna || [],
+        rows: response.sample || []
       });
+
       setCurrentView('configure');
+    } catch (error) {
+      console.error('Errore durante l’upload del file:', error);
+      
     }
-  };
+  }
+};
 
   // Algorithm parameter change handler
   const handleParamChange = (paramName, value) => {
@@ -203,22 +220,56 @@ const AnonimaData = () => {
 
   // Process anonymization
   const handleAnonymize = async () => {
-    setProcessingStatus('processing');
-    setCurrentView('preview');
+  setProcessingStatus('processing');
+  setCurrentView('preview');
+
+  try {
+    // parametri da inviare all'API 
+    const params = {
+      algorithm: selectedAlgorithm,
+      params: algorithmParams,
+      
+      filename: uploadedFile?.name || '',
+      
+    };
+
+    // Chiamata reale all'API
+    const response = await anonymizeData(params);
+
+    // Aggiorna l'anteprima con i dati anonimizzati ricevuti
+    setAnonymizedPreview({
+      columns: response.colonna || dataPreview.columns,
+      rows: response.dati_anonimizzati || [],  // attenzione ai nomi che ti manda backend
+    });
+
+    setProcessingStatus('completed');
+
+  } catch (error) {
+    console.error('Errore anonimizzazione:', error);
+    setProcessingStatus('error');
     
-    // Simulate processing time
-    setTimeout(() => {
-      setAnonymizedPreview({
-        columns: dataPreview.columns,
-        rows: [
-          ['*', 'Person A', '30-40', 'Centro Italia', '40000-50000'],
-          ['*', 'Person B', '25-35', 'Nord Italia', '50000-60000'],
-          ['*', 'Person C', '40-50', 'Sud Italia', '35000-45000']
-        ]
-      });
-      setProcessingStatus('completed');
-    }, 3000);
+    }
   };
+
+
+
+  const handleDownload = async (filename) => {
+  try {
+    const fileBlob = await downloadFile(filename);
+
+    // Crea un link temporaneo per scaricare il file
+    const url = window.URL.createObjectURL(fileBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename; // nome file per il download
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('Errore nel download:', error);
+  }
+};
 
   // Save anonymized dataset
   const handleSave = () => {
@@ -232,6 +283,20 @@ const AnonimaData = () => {
     };
     setDatasets(prev => [...prev, newDataset]);
     setCurrentView('dashboard');
+  };
+
+  // Load statistics from API
+  const loadStats = async () => {
+    try {
+      const data = await getFiles();
+      setStats({
+        totalDatasets: data.totalDatasets || 0,
+        completedJobs: data.completedJobs || 0,
+        dataProtected: data.dataProtected || 0
+      });
+    } catch (error) {
+      console.error('Errore nel caricamento delle statistiche:', error);
+    }
   };
 
   // Login View
@@ -366,7 +431,7 @@ const AnonimaData = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-600">Total Datasets</p>
-                    <p className="text-3xl font-bold text-gray-900">{datasets.length}</p>
+                    <p className="text-3xl font-bold text-gray-900">{stats.totalDatasets}</p>
                   </div>
                   <Database className="w-8 h-8 text-blue-600" />
                 </div>
@@ -376,7 +441,7 @@ const AnonimaData = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-600">Completed Jobs</p>
-                    <p className="text-3xl font-bold text-gray-900">{datasets.filter(d => d.status === 'completed').length}</p>
+                    <p className="text-3xl font-bold text-gray-900">{stats.completedJobs}</p>
                   </div>
                   <CheckCircle className="w-8 h-8 text-green-600" />
                 </div>
@@ -386,7 +451,7 @@ const AnonimaData = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-600">Data Protected</p>
-                    <p className="text-3xl font-bold text-gray-900">{datasets.reduce((sum, d) => sum + d.rows, 0)}</p>
+                    <p className="text-3xl font-bold text-gray-900">{stats.totalDatasets}</p>
                   </div>
                   <Lock className="w-8 h-8 text-purple-600" />
                 </div>
@@ -441,7 +506,9 @@ const AnonimaData = () => {
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button className="text-blue-600 hover:text-blue-900 mr-4">
+                            <button className="text-blue-600 hover:text-blue-900 mr-4"
+                             onClick={() => handleDownload(dataset.filename)}
+                            >
                               <Download className="w-4 h-4" />
                             </button>
                             <button className="text-purple-600 hover:text-purple-900">
