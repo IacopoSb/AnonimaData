@@ -19,11 +19,11 @@ if not PROJECT_ID:
 
 # Topics
 class Topics:
-    DATA_UPLOAD_REQUESTS = "data-upload-requests"
-    ANALYSIS_RESULTS = "analysis-results"
-    ANONYMIZATION_REQUESTS = "anonymization-requests"
-    ANONYMIZATION_RESULTS = "anonymization-results"
-    ERROR_NOTIFICATIONS = "error-notifications"
+    DATA_UPLOAD_REQUESTS = os.environ.get('FORMATTER_INPUT_TOPIC')
+    ANALYSIS_RESULTS = os.environ.get('FORMATTER_OUTPUT_SUB')
+    ANONYMIZATION_REQUESTS = os.environ.get('ANONYMIZER_INPUT_TOPIC')
+    ANONYMIZATION_RESULTS = os.environ.get('ANONYMIZER_OUTPUT_SUB')
+    ERROR_NOTIFICATIONS = os.environ.get('ERROR_INFORMATIONS_SUB')
 
 class GooglePubSubManager:
     def __init__(self):

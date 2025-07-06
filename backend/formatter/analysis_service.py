@@ -30,7 +30,6 @@ class AnalysisService:
         # Il servizio di analisi si iscrive alle richieste di upload
         self.pubsub_manager.subscribe(
             Topics.DATA_UPLOAD_REQUESTS, 
-            "analysis-service-sub", 
             self.handle_data_upload
         )
         

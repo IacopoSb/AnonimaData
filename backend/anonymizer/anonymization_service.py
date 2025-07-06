@@ -30,7 +30,6 @@ class AnonymizationService:
         # Il servizio di anonimizzazione si iscrive alle richieste di anonimizzazione
         self.pubsub_manager.subscribe(
             Topics.ANONYMIZATION_REQUESTS, 
-            "anonymization-service-sub", 
             self.handle_anonymization_request
         )
         self._initialize_method_schemas() # Mantiene la validazione dei parametri
@@ -149,7 +148,6 @@ class AnonymizationService:
             metadata_df = pd.read_json(StringIO(decoded_metadata), orient='records')
 
             # Prepara i metadati estesi in base alle selezioni utente
-            # Questa logica è simile a quella nel tuo worker.py originale
             extended_metadata_data = []
             for col_name in metadata_df['column_name']:
                 col_info = next((item for item in user_selections if item['column_name'] == col_name), None)

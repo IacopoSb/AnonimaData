@@ -483,9 +483,9 @@ def handle_error_notifications(data: Dict[str, Any]):
 
 def start_pubsub_listeners():
     try:
-        pubsub_manager.subscribe(Topics.ANALYSIS_RESULTS, f"frontend-analysis-results-sub-{uuid.uuid4().hex[:8]}", handle_analysis_results)
-        pubsub_manager.subscribe(Topics.ANONYMIZATION_RESULTS, f"frontend-anonymization-results-sub-{uuid.uuid4().hex[:8]}", handle_anonymization_results)
-        pubsub_manager.subscribe(Topics.ERROR_NOTIFICATIONS, f"frontend-error-notifications-sub-{uuid.uuid4().hex[:8]}", handle_error_notifications)
+        pubsub_manager.subscribe(Topics.ANALYSIS_RESULTS, handle_analysis_results)
+        pubsub_manager.subscribe(Topics.ANONYMIZATION_RESULTS, handle_anonymization_results)
+        pubsub_manager.subscribe(Topics.ERROR_NOTIFICATIONS, handle_error_notifications)
         logger.info("Frontend Pub/Sub listeners started.")
     except Exception as e:
         logger.error(f"Error starting frontend Pub/Sub listeners: {e}")
@@ -494,4 +494,4 @@ if __name__ == '__main__':
     listener_thread = threading.Thread(target=start_pubsub_listeners)
     listener_thread.daemon = True
     listener_thread.start()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=True)
