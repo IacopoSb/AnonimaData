@@ -1,10 +1,10 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-slim-buster
+FROM python:3.12-slim
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies required for building some Python packages (e.g., pandas)
+# Install system dependencies required for building some Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -16,15 +16,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the working directory
+# Including the 'templates' directory if you have one for Flask
 COPY . .
 
-# The GOOGLE_CLOUD_PROJECT_ID environment variable will be set by Terraform
-# in the deployment environment (e.g., Kubernetes, Cloud Run, GCE).
-# Ensure your Terraform configuration sets this environment variable for the container.
+# Expose the port that Flask will run on
+EXPOSE 8080
 
-# Expose the port if your service were to accept incoming HTTP requests directly.
-# (Not strictly necessary for a Pub/Sub consumer, but good practice if it ever expands)
-# EXPOSE 8080 
-
-# Run anonymization_service.py when the container launches
+# Run the Flask application when the container launches
 CMD ["python", "anonymization_service.py"]

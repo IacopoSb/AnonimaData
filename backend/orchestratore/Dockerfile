@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-slim-buster
+FROM python:3.12-slim
 
 # Set the working directory in the container
 WORKDIR /app
@@ -22,12 +22,5 @@ COPY . .
 # Expose the port that Flask will run on
 EXPOSE 8080
 
-# The GOOGLE_CLOUD_PROJECT_ID environment variable will be set by Terraform
-# in the deployment environment (e.g., Kubernetes, Cloud Run, GCE).
-# Ensure your Terraform configuration sets this environment variable for the container.
-
-# Run frontend_service.py when the container launches
-# Using Gunicorn or a similar WSGI server is recommended for production
-# For development/testing, Flask's built-in server is fine.
-# We'll use a simple command that sets FLASK_APP and runs it.
+# Run the Flask application when the container launches
 CMD ["python", "frontend_service.py"]
