@@ -164,6 +164,7 @@ resource "google_project_iam_member" "orchestratore_run_developer" {
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
 
+# DA RIMUOVERE DA GCR 
 resource "google_project_iam_member" "orchestratore_run_invoker" {
   project = var.project
   role    = "roles/run.invoker"
@@ -215,6 +216,20 @@ resource "google_project_iam_member" "frontend_run_invoker" {
   member  = "serviceAccount:${google_service_account.frontend_service_account.email}"
 }
 
+resource "google_cloud_run_service_iam_member" "formatter_invoker" {
+  service  = google_cloud_run_v2_service.formatter.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.formatter_service_account.email}"
+}
+
+resource "google_cloud_run_service_iam_member" "anonymizer_invoker" {
+  service  = google_cloud_run_v2_service.anonymizer.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
+}
+
 # === Pub/Sub Topics e Subscription per orchestrazione servizi ===
 
 # Orchestratore -> Formatter
@@ -226,6 +241,13 @@ resource "google_pubsub_topic" "formatter_input" {
 resource "google_pubsub_subscription" "formatter_input_sub" {
   name  = "formatter-input-sub"
   topic = google_pubsub_topic.formatter_input.name
+
+  push_config {
+    push_endpoint = google_cloud_run_v2_service.formatter.uri
+    oidc_token {
+      service_account_email = google_service_account.formatter_service_account.email
+    }
+  }
 }
 
 # Formatter -> Orchestratore
@@ -248,6 +270,13 @@ resource "google_pubsub_topic" "anonymizer_input" {
 resource "google_pubsub_subscription" "anonymizer_input_sub" {
   name  = "anonymizer-input-sub"
   topic = google_pubsub_topic.anonymizer_input.name
+
+  push_config {
+    push_endpoint = google_cloud_run_v2_service.anonymizer.uri
+    oidc_token {
+      service_account_email = google_service_account.anonymizer_service_account.email
+    }
+  }
 }
 
 # Anonymizer -> Orchestratore
@@ -272,91 +301,84 @@ resource "google_pubsub_subscription" "error_informations_sub" {
   topic = google_pubsub_topic.error_informations.name
 }
 
-# Cloud Run Job per Anonymizer
-resource "google_cloud_run_v2_job" "anonymizer_job" {
-  name     = "anonymizer-job"
+resource "google_cloud_run_v2_service" "anonymizer" {
+  name     = "anonymizer"
   location = var.region
 
   template {
-    template {
-      service_account = google_service_account.anonymizer_service_account.email
-      vpc_access {
-        connector = google_vpc_access_connector.connector.id
-        egress    = "ALL_TRAFFIC"
-      }
-      containers {
-        image = "gcr.io/${var.project}/anonymizer:latest"
-        env {
-          name  = "GOOGLE_CLOUD_PROJECT_ID"
-          value = var.project
-        }
-        env {
-          name  = "ANONYMIZER_INPUT_SUB"
-          value = google_pubsub_subscription.anonymizer_input_sub.name
-        }
-        env {
-          name  = "ANONYMIZER_OUTPUT_TOPIC"
-          value = google_pubsub_topic.anonymizer_output.name
-        }
-        env {
-          name  = "BUCKET_NAME"
-          value = google_storage_bucket.csv_bucket.name
-        }
-        resources {
-          limits = {
-            memory = "1Gi"
-            cpu    = "1"
-          }
-        }
-      }
-      max_retries = 3
-      timeout = "3600s"
+    service_account = google_service_account.anonymizer_service_account.email
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "ALL_TRAFFIC"
     }
+    containers {
+      image = "gcr.io/${var.project}/anonymizer:latest"
+      ports {
+        container_port = 8080
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT_ID"
+        value = var.project
+      }
+      env {
+        name  = "ANONYMIZER_OUTPUT_TOPIC"
+        value = google_pubsub_topic.anonymizer_output.name
+      }
+      resources {
+        limits = {
+          memory = "1Gi"
+          cpu    = "1"
+        }
+      }
+    }
+    timeout = "300s"
+    max_instance_request_concurrency = 1000
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
   depends_on = [google_project_service.run]
 }
 
-# Cloud Run Job per Formatter
-resource "google_cloud_run_v2_job" "formatter_job" {
-  name     = "formatter-job"
+resource "google_cloud_run_v2_service" "formatter" {
+  name     = "formatter"
   location = var.region
 
   template {
-    template {
-      service_account = google_service_account.formatter_service_account.email
-      vpc_access {
-        connector = google_vpc_access_connector.connector.id
-        egress    = "ALL_TRAFFIC"
-      }
-      containers {
-        image = "gcr.io/${var.project}/formatter:latest"
-        env {
-          name  = "GOOGLE_CLOUD_PROJECT_ID"
-          value = var.project
-        }
-        env {
-          name  = "FORMATTER_INPUT_SUB"
-          value = google_pubsub_subscription.formatter_input_sub.name
-        }
-        env {
-          name  = "FORMATTER_OUTPUT_TOPIC"
-          value = google_pubsub_topic.formatter_output.name
-        }
-        env {
-          name  = "BUCKET_NAME"
-          value = google_storage_bucket.csv_bucket.name
-        }
-        resources {
-          limits = {
-            memory = "1Gi"
-            cpu    = "1"
-          }
-        }
-      }
-      max_retries = 3
-      timeout = "3600s"
+    service_account = google_service_account.formatter_service_account.email
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "ALL_TRAFFIC"
     }
+    containers {
+      image = "gcr.io/${var.project}/formatter:latest"
+      ports {
+        container_port = 8080
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT_ID"
+        value = var.project
+      }
+      # aggiungi altre variabili env se servono
+      resources {
+        limits = {
+          memory = "1Gi"
+          cpu    = "1"
+        }
+      }
+    }
+    timeout = "300s"
+    max_instance_request_concurrency = 1000
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
   depends_on = [google_project_service.run]
@@ -455,14 +477,6 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         value = google_pubsub_subscription.anonymizer_output_sub.name
       }
       env {
-        name  = "FORMATTER_JOB_NAME"
-        value = google_cloud_run_v2_job.formatter_job.name
-      }
-      env {
-        name  = "ANONYMIZER_JOB_NAME"
-        value = google_cloud_run_v2_job.anonymizer_job.name
-      }
-      env {
         name  = "ERROR_INFORMATIONS_SUB"
         value = google_pubsub_subscription.error_informations_sub.name
       }
@@ -503,16 +517,6 @@ output "frontend_url" {
 output "orchestratore_url" {
   description = "L'URL del backend orchestratore"
   value       = google_cloud_run_v2_service.orchestratore.uri
-}
-
-output "anonymizer_job_name" {
-  description = "Nome del job anonymizer"
-  value       = google_cloud_run_v2_job.anonymizer_job.name
-}
-
-output "formatter_job_name" {
-  description = "Nome del job formatter"
-  value       = google_cloud_run_v2_job.formatter_job.name
 }
 
 output "db_instance_connection_name" {
