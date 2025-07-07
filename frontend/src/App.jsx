@@ -3,7 +3,6 @@ import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, Alert
 import { uploadFile, getFiles, anonymizeData, downloadFile,checkJobStatus  } from './api';
 
 
-
 // Firebase configuration 
 const firebaseConfig = {
   apiKey: "AIzaSyA4coFZ1hQkJAdMcSVIpbWgZ3Fa99knxz4",
@@ -14,7 +13,7 @@ const firebaseConfig = {
   appId: "1:614401261394:web:459f56b903f80d4df9848b"
 };
 
-// Firebase will be loaded from CDN - we'll initialize it in useEffect
+// Firebase will be loaded from CDN 
 let auth = null;
 let provider = null;
 
@@ -173,7 +172,7 @@ const AnonimaData = () => {
   };
 
 
-  // File upload handler POLLING
+  //  handleFileUpload 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
 
@@ -186,18 +185,14 @@ const AnonimaData = () => {
 
       try {
         const response = await uploadFile(formData);
+        console.log('Upload response:', response);
 
-        if (response.idJob) {
-          // Il backend restituisce un idJob, avvia il polling
-          startPolling(response.idJob);
+        // La risposta ora è sempre: { message: "...", job_id: "uuid-string", filename: "example.csv" }
+        if (response.job_id) {
+          startPolling(response.job_id);
           setCurrentView('processing');
         } else {
-          // Fallback per compatibilità con API che restituiscono dati direttamente
-          setDataPreview({
-            columns: response.colonna || response.columns || [],
-            rows: response.sample || response.rows || []
-          });
-          setCurrentView('configure');
+          throw new Error('No job_id returned from server');
         }
       } catch (error) {
         console.error('Errore durante l\'upload del file:', error);
@@ -233,65 +228,58 @@ const startPolling = (jobId) => {
   const interval = setInterval(async () => {
     try {
       const response = await checkJobStatus(jobId);
-      console.log("Polling status:", response.status);
+      console.log("Polling status:", response);
       
-      // La risposta contiene: { idJob, status, ...otherData }
       if (response.status === 'analized') {
-        // Analisi completata - ferma il polling
+        // Analisi completata
         setProcessingStatus('completed');
         setProcessingMessage('Analysis completed successfully!');
         setUploadProgress(100);
         
-        // Aggiorna i dati con le informazioni ricevute
         setDataPreview({
-          columns: response.columns || response.colonna || [],
-          rows: response.sample || response.rows || []
+          columns: response.columns || [],
+          rows: response.sample || []
         });
         
-        // Ferma il polling
         clearInterval(interval);
         setPollingInterval(null);
-        
-        // Passa automaticamente alla configurazione
         setCurrentView('configure');
         
       } else if (response.status === 'anonymized' || response.status === 'completed') {
-        // Anonimizzazione completata - ferma il polling
+        // Anonimizzazione completata
         setProcessingStatus('completed');
         setProcessingMessage('Anonymization completed successfully!');
         setUploadProgress(100);
         
-        // Aggiorna i dati anonimizzati
         setAnonymizedPreview({
-          columns: response.columns || response.colonna || dataPreview.columns,
+          columns: response.columns || dataPreview.columns,
           rows: response.dati_anonimizzati || response.anonymized_data || []
         });
         
-        // Ferma il polling
         clearInterval(interval);
         setPollingInterval(null);
         
-        // Rimani nella vista preview per mostrare i risultati
-        // setCurrentView('preview'); // già impostato in handleAnonymize
+      } else if (response.status === 'error') {
+        // Errore
+        setProcessingStatus('error');
+        setProcessingMessage(response.details || 'An error occurred during processing');
+        clearInterval(interval);
+        setPollingInterval(null);
         
       } else {
         // Ancora in elaborazione
-        if (response.status === 'processing_anonymization') {
-          setProcessingMessage('Applying anonymization algorithm...');
-        } else {
-          setProcessingMessage('Processing your data...');
-        }
-        // Puoi aggiungere altri stati se il backend li fornisce
+        setProcessingMessage(response.details || 'Processing your data...');
       }
     } catch (error) {
       console.error('Polling error:', error);
-      // Continua il polling anche in caso di errore di rete
       setProcessingMessage('Checking status...');
     }
-  }, 1000); // Poll ogni secondo
+  }, 1000);
   
   setPollingInterval(interval);
 };
+
+
  useEffect(() => {
     return () => {
       if (pollingInterval) {
@@ -301,104 +289,16 @@ const startPolling = (jobId) => {
   }, [pollingInterval]);
 
 
-/*
-    // Funzione per avviare il polling
-  const startPolling = (jobId) => {
-    setJobId(jobId);
-    setProcessingStatus('processing');
-    setProcessingMessage('Analyzing your dataset...');
-    
-    const interval = setInterval(async () => {
-      try {
-        const response = await checkJobStatus(jobId);
-        console.log("Polling status:", response.status);
-        
-        // La risposta contiene: { idJob, status, ...otherData }
-        if (response.status === 'analized') {
-          // Analisi completata - ferma il polling
-          setProcessingStatus('completed');
-          setProcessingMessage('Analysis completed successfully!');
-          setUploadProgress(100);
-          
-          // Aggiorna i dati con le informazioni ricevute
-          setDataPreview({
-            columns: response.columns || response.colonna || [],
-            rows: response.sample || response.rows || []
-          });
-          
-          // Ferma il polling
-          clearInterval(interval);
-          setPollingInterval(null);
-          
-          // Passa automaticamente alla configurazione
-          setCurrentView('configure');
-          
-        } else {
-          // Ancora in elaborazione
-          setProcessingMessage('Analyzing your data...');
-          // Puoi aggiungere altri stati se il backend li fornisce
-        }
-      } catch (error) {
-        console.error('Polling error:', error);
-        // Continua il polling anche in caso di errore di rete
-        setProcessingMessage('Checking status...');
-      }
-    }, 1000); // Poll ogni secondo
-    
-    setPollingInterval(interval);
-  };
-*/
-  // Ferma il polling quando il componente viene smontato
- 
 
-
-
-/*
-  // Process anonymization
-    const handleAnonymize = async () => {
-      setProcessingStatus('processing');
-      setCurrentView('preview');
-      setProcessingMessage('Starting anonymization process...');
-
-      try {
-        const params = {
-          algorithm: selectedAlgorithm,
-          params: algorithmParams,
-          filename: uploadedFile?.name || '',
-          job_id: jobId // Passa il job_id se disponibile
-        };
-
-        const response = await anonymizeData(params);
-
-        if (response.job_id) {
-          // Se viene restituito un nuovo job_id, avvia il polling
-          startPolling(response.job_id);
-        } else {
-          // Risultati immediati (fallback)
-          setAnonymizedPreview({
-            columns: response.colonna || dataPreview.columns,
-            rows: response.dati_anonimizzati || []
-          });
-          setProcessingStatus('completed');
-        }
-      } catch (error) {
-        console.error('Errore anonimizzazione:', error);
-        setProcessingStatus('error');
-        setProcessingMessage('Anonymization failed. Please try again.');
-      }
-    };
-*/
-  // Process anonymization modificato
+// 3. Aggiorna handleAnonymize per usare il nuovo formato
 const handleAnonymize = async () => {
   setProcessingStatus('processing');
   setCurrentView('preview');
   setProcessingMessage('Starting anonymization process...');
 
   try {
-    // Prepara la userSelection con le informazioni delle checkbox
     const userSelection = {};
     
-    // Per ogni colonna, aggiungi le informazioni sui checkbox selezionati
     dataPreview.columns.forEach(column => {
       userSelection[column] = {
         quasi: columnConfig[column]?.quasi || false,
@@ -407,27 +307,22 @@ const handleAnonymize = async () => {
     });
 
     const params = {
+      job_id: jobId, // Assicurati che questo sia disponibile
       algorithm: selectedAlgorithm,
       params: algorithmParams,
-      filename: uploadedFile?.name || '',
-      job_id: jobId, // Passa il job_id se disponibile
-      userSelection: userSelection // Aggiungi le selezioni dell'utente
+      userSelection: userSelection
     };
 
-    console.log('Sending anonymization request with userSelection:', userSelection);
+    console.log('Sending anonymization request:', params);
 
     const response = await anonymizeData(params);
+    console.log('Anonymization response:', response);
 
     if (response.job_id) {
-      // Se viene restituito un nuovo job_id, avvia il polling
+      // Continua il polling per l'anonimizzazione
       startPolling(response.job_id);
     } else {
-      // Risultati immediati (fallback)
-      setAnonymizedPreview({
-        columns: response.colonna || dataPreview.columns,
-        rows: response.dati_anonimizzati || []
-      });
-      setProcessingStatus('completed');
+      throw new Error('No job_id returned from anonymization request');
     }
   } catch (error) {
     console.error('Errore anonimizzazione:', error);
@@ -437,15 +332,15 @@ const handleAnonymize = async () => {
 };
 
 
-  const handleDownload = async (filename) => {
+// 4. Aggiorna handleDownload per usare il nuovo formato
+const handleDownload = async (jobId, type = 'full') => {
   try {
-    const fileBlob = await downloadFile(filename);
+    const fileBlob = await downloadFile(jobId, type);
 
-    // Crea un link temporaneo per scaricare il file
     const url = window.URL.createObjectURL(fileBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename; // nome file per il download
+    a.download = `anonymized_data_${jobId}_${type}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -469,19 +364,36 @@ const handleAnonymize = async () => {
     setCurrentView('dashboard');
   };
 
-  // Load statistics from API
-  const loadStats = async () => {
-    try {
-      const data = await getFiles();
-      setStats({
-        totalDatasets: data.totalDatasets || 0,
-        completedJobs: data.completedJobs || 0,
-        dataProtected: data.dataProtected || 0
-      });
-    } catch (error) {
-      console.error('Errore nel caricamento delle statistiche:', error);
+// 5. Aggiorna loadStats per usare la nuova struttura
+const loadStats = async () => {
+  try {
+    const data = await getFiles();
+    console.log('Stats data:', data);
+    
+    setStats({
+      totalDatasets: data.totalDatasets || 0,
+      completedJobs: data.completedJobs || 0,
+      dataProtected: data.dataProtected || 0
+    });
+    
+    // Opzionalmente, aggiorna anche la lista dei dataset
+    if (data.files) {
+      const transformedDatasets = data.files.map(file => ({
+        id: file.job_id,
+        name: file.filename,
+        algorithm: file.method_used || 'Unknown',
+        created: new Date().toLocaleDateString(), // L'API non fornisce la data
+        status: file.status,
+        rows: file.rows || 0,
+        filename: file.job_id // Per il download
+      }));
+      
+      setDatasets(transformedDatasets);
     }
-  };
+  } catch (error) {
+    console.error('Errore nel caricamento delle statistiche:', error);
+  }
+};
 
   // Login View
   if (loading) {
@@ -691,7 +603,7 @@ const handleAnonymize = async () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button className="text-blue-600 hover:text-blue-900 mr-4"
-                             onClick={() => handleDownload(dataset.filename)}
+                             onClick={() => handleDownload(dataset.id)}
                             >
                               <Download className="w-4 h-4" />
                             </button>
