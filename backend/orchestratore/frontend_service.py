@@ -22,16 +22,19 @@ CORS(app)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# PubSub Manager
 from google_pubsub_manager import get_pubsub_manager, Topics
 pubsub_manager = get_pubsub_manager()
 
+try:
+    from google_pubsub_manager import get_pubsub_manager, Topics
+    pubsub_manager = get_pubsub_manager()
+    logger.info("PubSub Manager initialized for publishing.")
+except ImportError:
+    logger.warning("google_pubsub_manager not found. Publishing capabilities might be disabled.")
+    pubsub_manager = None # O gestisci l'errore diversamente se è critico
+
 # In-memory job status
 job_status_map: Dict[str, Dict[str, Any]] = {}
-
-@app.route('/')
-def index():
-    return render_template('index.html')
 
 @app.route('/upload_and_analyze', methods=['POST'])
 def upload_and_analyze():
@@ -66,7 +69,7 @@ def upload_and_analyze():
             'filename': original_filename,
             'file_content_base64': encoded_file_content
         }, attributes={'job_id': job_id})
-
+        
         return jsonify({
             "message": "File uploaded and analysis initiated",
             "job_id": job_id,
@@ -270,7 +273,7 @@ def request_anonymization():
         'processed_data_content_base64': encoded_processed_csv,
         'metadata_content_base64': encoded_metadata_json
     }, attributes={'job_id': job_id})
-
+    
     return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
 
 # Download endpoints remain the same as before
@@ -390,8 +393,10 @@ def export_anonymization_json(job_id):
         logger.error(f"Error exporting JSON for job {job_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Modified PubSub handlers to store DataFrames directly
-def handle_analysis_results(data: Dict[str, Any]):
+# NEW: Endpoints per ricevere i risultati via POST
+@app.route('/receive_analysis_results', methods=['POST'])
+def receive_analysis_results():
+    data = request.json
     job_id = data.get('job_id')
     status = data.get('status')
     processed_data_content_base64 = data.get('processed_data_content_base64')
@@ -416,17 +421,22 @@ def handle_analysis_results(data: Dict[str, Any]):
                 'metadata': metadata_df,
                 'analysis_completed_at': datetime.now().isoformat()
             })
-            logger.info(f"Frontend: Analysis results received for job {job_id}")
+            logger.info(f"Frontend: Analysis results received via POST for job {job_id}")
+            return jsonify({"message": "Analysis results received successfully"}), 200
         except Exception as e:
             logger.error(f"Error processing analysis results for job {job_id}: {e}")
             job_status_map[job_id].update({
                 'status': 'error',
                 'details': f"Error processing analysis results: {str(e)}"
             })
+            return jsonify({"error": str(e)}), 400
     else:
         logger.warning(f"Frontend: Received analysis results for unknown job {job_id}")
+        return jsonify({"error": "Job ID not found"}), 404
 
-def handle_anonymization_results(data: Dict[str, Any]):
+@app.route('/receive_anonymization_results', methods=['POST'])
+def receive_anonymization_results():
+    data = request.json
     job_id = data.get('job_id')
     status = data.get('status')
     anonymized_file_content_base64 = data.get('anonymized_file_content_base64')
@@ -453,17 +463,22 @@ def handle_anonymization_results(data: Dict[str, Any]):
                 'anonymized_sample': sample_df,
                 'anonymization_completed_at': datetime.now().isoformat()
             })
-            logger.info(f"Frontend: Anonymization results received for job {job_id}")
+            logger.info(f"Frontend: Anonymization results received via POST for job {job_id}")
+            return jsonify({"message": "Anonymization results received successfully"}), 200
         except Exception as e:
             logger.error(f"Error processing anonymization results for job {job_id}: {e}")
             job_status_map[job_id].update({
                 'status': 'error',
                 'details': f"Error processing anonymization results: {str(e)}"
             })
+            return jsonify({"error": str(e)}), 400
     else:
         logger.warning(f"Frontend: Received anonymization results for unknown job {job_id}")
+        return jsonify({"error": "Job ID not found"}), 404
 
-def handle_error_notifications(data: Dict[str, Any]):
+@app.route('/receive_error_notifications', methods=['POST'])
+def receive_error_notifications():
+    data = request.json
     job_id = data.get('job_id')
     stage = data.get('stage')
     error_message = data.get('error')
@@ -477,21 +492,11 @@ def handle_error_notifications(data: Dict[str, Any]):
             'error_message': error_message,
             'error_at': datetime.now().isoformat()
         })
-        logger.error(f"Frontend: Error notification received for job {job_id} in stage {stage}")
+        logger.error(f"Frontend: Error notification received via POST for job {job_id} in stage {stage}")
+        return jsonify({"message": "Error notification received successfully"}), 200
     else:
         logger.warning(f"Frontend: Received error for unknown job {job_id} in stage {stage}")
-
-def start_pubsub_listeners():
-    try:
-        pubsub_manager.subscribe(Topics.ANALYSIS_RESULTS, handle_analysis_results)
-        pubsub_manager.subscribe(Topics.ANONYMIZATION_RESULTS, handle_anonymization_results)
-        pubsub_manager.subscribe(Topics.ERROR_NOTIFICATIONS, handle_error_notifications)
-        logger.info("Frontend Pub/Sub listeners started.")
-    except Exception as e:
-        logger.error(f"Error starting frontend Pub/Sub listeners: {e}")
+        return jsonify({"error": "Job ID not found"}), 404
 
 if __name__ == '__main__':
-    listener_thread = threading.Thread(target=start_pubsub_listeners)
-    listener_thread.daemon = True
-    listener_thread.start()
     app.run(host='0.0.0.0', port=8080, debug=True)
