@@ -157,13 +157,6 @@ resource "google_project_iam_member" "orchestratore_cloudsql" {
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
 
-# IAM per orchestratore per eseguire i jobs
-resource "google_project_iam_member" "orchestratore_run_developer" {
-  project = var.project
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
-}
-
 # DA RIMUOVERE DA GCR 
 resource "google_project_iam_member" "orchestratore_run_invoker" {
   project = var.project
@@ -171,7 +164,7 @@ resource "google_project_iam_member" "orchestratore_run_invoker" {
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
 
-# IAM per formatter (pubsub, storage per accesso ai dati)
+# IAM per formatter (pubsub)
 resource "google_project_iam_member" "formatter_pubsub_publisher" {
   project = var.project
   role    = "roles/pubsub.publisher"
@@ -184,13 +177,7 @@ resource "google_project_iam_member" "formatter_pubsub_subscriber" {
   member  = "serviceAccount:${google_service_account.formatter_service_account.email}"
 }
 
-resource "google_project_iam_member" "formatter_storage" {
-  project = var.project
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.formatter_service_account.email}"
-}
-
-# IAM per anonymizer (pubsub, storage per accesso ai dati)
+# IAM per anonymizer (pubsub)
 resource "google_project_iam_member" "anonymizer_pubsub_publisher" {
   project = var.project
   role    = "roles/pubsub.publisher"
@@ -200,12 +187,6 @@ resource "google_project_iam_member" "anonymizer_pubsub_publisher" {
 resource "google_project_iam_member" "anonymizer_pubsub_subscriber" {
   project = var.project
   role    = "roles/pubsub.subscriber"
-  member  = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
-}
-
-resource "google_project_iam_member" "anonymizer_storage" {
-  project = var.project
-  role    = "roles/storage.objectAdmin"
   member  = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
 }
 
@@ -259,6 +240,12 @@ resource "google_pubsub_topic" "formatter_output" {
 resource "google_pubsub_subscription" "formatter_output_sub" {
   name  = "formatter-output-sub"
   topic = google_pubsub_topic.formatter_output.name
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.orchestratore.uri}/receive_analysis_results"
+    oidc_token {
+      service_account_email = google_service_account.orchestratore_service_account.email
+    }
+  }
 }
 
 # Orchestratore -> Anonymizer
@@ -288,6 +275,13 @@ resource "google_pubsub_topic" "anonymizer_output" {
 resource "google_pubsub_subscription" "anonymizer_output_sub" {
   name  = "anonymizer-output-sub"
   topic = google_pubsub_topic.anonymizer_output.name
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.orchestratore.uri}/receive_anonymization_results"
+    oidc_token {
+      service_account_email = google_service_account.orchestratore_service_account.email
+    }
+  }
 }
 
 #error topic
@@ -299,6 +293,13 @@ resource "google_pubsub_topic" "error_informations" {
 resource "google_pubsub_subscription" "error_informations_sub" {
   name = "error-information-sub"
   topic = google_pubsub_topic.error_informations.name
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.orchestratore.uri}/receive_error_notifications"
+    oidc_token {
+      service_account_email = google_service_account.orchestratore_service_account.email
+    }
+  }
 }
 
 resource "google_cloud_run_v2_service" "anonymizer" {

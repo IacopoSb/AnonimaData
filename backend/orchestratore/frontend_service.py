@@ -8,8 +8,6 @@ import uuid
 import json
 import base64
 from datetime import datetime
-import threading
-import time
 from typing import Any, Dict
 from flask_cors import CORS
 
@@ -396,107 +394,144 @@ def export_anonymization_json(job_id):
 # NEW: Endpoints per ricevere i risultati via POST
 @app.route('/receive_analysis_results', methods=['POST'])
 def receive_analysis_results():
-    data = request.json
-    job_id = data.get('job_id')
-    status = data.get('status')
-    processed_data_content_base64 = data.get('processed_data_content_base64')
-    metadata_content_base64 = data.get('metadata_content_base64')
-    dataset_info = data.get('dataset_info')
+    envelope = request.get_json()
+    if not envelope or 'message' not in envelope:
+        logger.error("Invalid Pub/Sub message format")
+        return 'Bad Request', 400
+    pubsub_message = envelope['message']
+    try:
+        payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
+        message_data = json.loads(payload)
+        logger.info(f"Received Pub/Sub push: {message_data}")
+        data = message_data.get('data')
+        job_id = data.get('job_id')
+        status = data.get('status')
+        processed_data_content_base64 = data.get('processed_data_content_base64')
+        metadata_content_base64 = data.get('metadata_content_base64')
+        dataset_info = data.get('dataset_info')
 
-    if job_id in job_status_map:
-        try:
-            # Decode and convert to DataFrame
-            processed_csv = base64.b64decode(processed_data_content_base64).decode('utf-8')
-            processed_df = pd.read_csv(StringIO(processed_csv))
-            
-            metadata_json = base64.b64decode(metadata_content_base64).decode('utf-8')
-            metadata_df = pd.read_json(StringIO(metadata_json), orient='records')
+        if job_id in job_status_map:
+            try:
+                # Decode and convert to DataFrame
+                processed_csv = base64.b64decode(processed_data_content_base64).decode('utf-8')
+                processed_df = pd.read_csv(StringIO(processed_csv))
+                
+                metadata_json = base64.b64decode(metadata_content_base64).decode('utf-8')
+                metadata_df = pd.read_json(StringIO(metadata_json), orient='records')
 
-            job_status_map[job_id].update({
-                'status': status,
-                'progress': 50,
-                'details': 'Data analysis completed.',
-                'dataset_info': dataset_info,
-                'processed_data': processed_df,
-                'metadata': metadata_df,
-                'analysis_completed_at': datetime.now().isoformat()
-            })
-            logger.info(f"Frontend: Analysis results received via POST for job {job_id}")
-            return jsonify({"message": "Analysis results received successfully"}), 200
-        except Exception as e:
-            logger.error(f"Error processing analysis results for job {job_id}: {e}")
-            job_status_map[job_id].update({
-                'status': 'error',
-                'details': f"Error processing analysis results: {str(e)}"
-            })
-            return jsonify({"error": str(e)}), 400
-    else:
-        logger.warning(f"Frontend: Received analysis results for unknown job {job_id}")
-        return jsonify({"error": "Job ID not found"}), 404
+                job_status_map[job_id].update({
+                    'status': status,
+                    'progress': 50,
+                    'details': 'Data analysis completed.',
+                    'dataset_info': dataset_info,
+                    'processed_data': processed_df,
+                    'metadata': metadata_df,
+                    'analysis_completed_at': datetime.now().isoformat()
+                })
+                logger.info(f"Frontend: Analysis results received via POST for job {job_id}")
+                return jsonify({"message": "Analysis results received successfully"}), 200
+            except Exception as e:
+                logger.error(f"Error processing analysis results for job {job_id}: {e}")
+                job_status_map[job_id].update({
+                    'status': 'error',
+                    'details': f"Error processing analysis results: {str(e)}"
+                })
+                return jsonify({"error": str(e)}), 400
+        else:
+            logger.warning(f"Frontend: Received analysis results for unknown job {job_id}")
+            return jsonify({"error": "Job ID not found"}), 404
+    except Exception as e:
+        logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
+        return 'Bad Request', 400
 
 @app.route('/receive_anonymization_results', methods=['POST'])
 def receive_anonymization_results():
-    data = request.json
-    job_id = data.get('job_id')
-    status = data.get('status')
-    anonymized_file_content_base64 = data.get('anonymized_file_content_base64')
-    anonymized_sample_content_base64 = data.get('anonymized_sample_content_base64')
-    method_used = data.get('method_used')
-    params_used = data.get('params_used')
+    envelope = request.get_json()
+    if not envelope or 'message' not in envelope:
+        logger.error("Invalid Pub/Sub message format")
+        return 'Bad Request', 400
+    pubsub_message = envelope['message']
+    try:
+        payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
+        message_data = json.loads(payload)
+        logger.info(f"Received Pub/Sub push: {message_data}")
+        data = message_data.get('data')
+        job_id = data.get('job_id')
+        status = data.get('status')
+        anonymized_file_content_base64 = data.get('anonymized_file_content_base64')
+        anonymized_sample_content_base64 = data.get('anonymized_sample_content_base64')
+        method_used = data.get('method_used')
+        params_used = data.get('params_used')
 
-    if job_id in job_status_map:
-        try:
-            # Decode and convert to DataFrame
-            anonymized_csv = base64.b64decode(anonymized_file_content_base64).decode('utf-8')
-            anonymized_df = pd.read_csv(StringIO(anonymized_csv))
-            
-            sample_csv = base64.b64decode(anonymized_sample_content_base64).decode('utf-8')
-            sample_df = pd.read_csv(StringIO(sample_csv))
+        if job_id in job_status_map:
+            try:
+                # Decode and convert to DataFrame
+                anonymized_csv = base64.b64decode(anonymized_file_content_base64).decode('utf-8')
+                anonymized_df = pd.read_csv(StringIO(anonymized_csv))
+                
+                sample_csv = base64.b64decode(anonymized_sample_content_base64).decode('utf-8')
+                sample_df = pd.read_csv(StringIO(sample_csv))
 
-            job_status_map[job_id].update({
-                'status': status,
-                'progress': 100,
-                'details': 'Data anonymization completed.',
-                'method_used': method_used,
-                'params_used': params_used,
-                'anonymized_data': anonymized_df,
-                'anonymized_sample': sample_df,
-                'anonymization_completed_at': datetime.now().isoformat()
-            })
-            logger.info(f"Frontend: Anonymization results received via POST for job {job_id}")
-            return jsonify({"message": "Anonymization results received successfully"}), 200
-        except Exception as e:
-            logger.error(f"Error processing anonymization results for job {job_id}: {e}")
-            job_status_map[job_id].update({
-                'status': 'error',
-                'details': f"Error processing anonymization results: {str(e)}"
-            })
-            return jsonify({"error": str(e)}), 400
-    else:
-        logger.warning(f"Frontend: Received anonymization results for unknown job {job_id}")
-        return jsonify({"error": "Job ID not found"}), 404
+                job_status_map[job_id].update({
+                    'status': status,
+                    'progress': 100,
+                    'details': 'Data anonymization completed.',
+                    'method_used': method_used,
+                    'params_used': params_used,
+                    'anonymized_data': anonymized_df,
+                    'anonymized_sample': sample_df,
+                    'anonymization_completed_at': datetime.now().isoformat()
+                })
+                logger.info(f"Frontend: Anonymization results received via POST for job {job_id}")
+                return jsonify({"message": "Anonymization results received successfully"}), 200
+            except Exception as e:
+                logger.error(f"Error processing anonymization results for job {job_id}: {e}")
+                job_status_map[job_id].update({
+                    'status': 'error',
+                    'details': f"Error processing anonymization results: {str(e)}"
+                })
+                return jsonify({"error": str(e)}), 400
+        else:
+            logger.warning(f"Frontend: Received anonymization results for unknown job {job_id}")
+            return jsonify({"error": "Job ID not found"}), 404
+    except Exception as e:
+        logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
+        return 'Bad Request', 400
+
 
 @app.route('/receive_error_notifications', methods=['POST'])
 def receive_error_notifications():
-    data = request.json
-    job_id = data.get('job_id')
-    stage = data.get('stage')
-    error_message = data.get('error')
+    envelope = request.get_json()
+    if not envelope or 'message' not in envelope:
+        logger.error("Invalid Pub/Sub message format")
+        return 'Bad Request', 400
+    pubsub_message = envelope['message']
+    try:
+        payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
+        message_data = json.loads(payload)
+        logger.info(f"Received Pub/Sub push: {message_data}")
+        data = message_data.get('data')
+        job_id = data.get('job_id')
+        stage = data.get('stage')
+        error_message = data.get('error')
 
-    if job_id in job_status_map:
-        job_status_map[job_id].update({
-            'status': 'error',
-            'progress': -1,
-            'details': f"Error during {stage}: {error_message}",
-            'error_stage': stage,
-            'error_message': error_message,
-            'error_at': datetime.now().isoformat()
-        })
-        logger.error(f"Frontend: Error notification received via POST for job {job_id} in stage {stage}")
-        return jsonify({"message": "Error notification received successfully"}), 200
-    else:
-        logger.warning(f"Frontend: Received error for unknown job {job_id} in stage {stage}")
-        return jsonify({"error": "Job ID not found"}), 404
+        if job_id in job_status_map:
+            job_status_map[job_id].update({
+                'status': 'error',
+                'progress': -1,
+                'details': f"Error during {stage}: {error_message}",
+                'error_stage': stage,
+                'error_message': error_message,
+                'error_at': datetime.now().isoformat()
+            })
+            logger.error(f"Frontend: Error notification received via POST for job {job_id} in stage {stage}")
+            return jsonify({"message": "Error notification received successfully"}), 200
+        else:
+            logger.warning(f"Frontend: Received error for unknown job {job_id} in stage {stage}")
+            return jsonify({"error": "Job ID not found"}), 404
+    except Exception as e:
+        logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
+        return 'Bad Request', 400
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=False)
