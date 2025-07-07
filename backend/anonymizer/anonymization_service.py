@@ -161,7 +161,8 @@ def pubsub_push_handler():
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
         data = json.loads(payload)
-        service.handle_anonymization_request(data)
+        logger.info(f"Received Pub/Sub push: {data}")
+        service.handle_anonymization_request(data.get('data'))  # From pub/sub json extract only the payload relevant for app use
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
         return 'Bad Request', 400
