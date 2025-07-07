@@ -10,12 +10,43 @@ import base64
 from datetime import datetime
 from typing import Any, Dict
 from flask_cors import CORS
+import firebase_admin
+from firebase_admin import auth, credentials
+
+# Configurations (enviroment variables))
+DB_HOST = os.environ.get("DB_HOST")
+DB_NAME = os.environ.get("DB_NAME")
+DB_USER = os.environ.get("DB_USER")
+DB_PASSWORD = os.environ.get("DB_PASSWORD")
+BUCKET_NAME = os.environ.get("BUCKET_NAME")
+FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
+
+# Firebase Admin
+firebase_admin.initialize_app()
+
+# Firebase decorator to check authentication and extract UID inside request.user_id
+def firebase_auth_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', None)
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+        id_token = auth_header.split(" ")[1]
+        try:
+            decoded_token = auth.verify_id_token(id_token)
+            request.user_id = decoded_token["uid"]
+            return f(*args, **kwargs)
+        except Exception as e:
+            logging.warning(f"Firebase Auth failed: {e}")
+            return jsonify({"error": "Invalid auth token"}), 401
+    return decorated_function
 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -38,6 +69,7 @@ job_status_map: Dict[str, Dict[str, Any]] = {}
 # ==== NEW FILE FLOW ====
 # 1) Upload of a new file to be analyzed
 @app.route('/upload_and_analyze', methods=['POST'])
+@firebase_auth_required
 def upload_and_analyze():
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -62,7 +94,8 @@ def upload_and_analyze():
             'processed_data': None,
             'metadata': None,
             'anonymized_data': None,
-            'anonymized_sample': None
+            'anonymized_sample': None,
+            'user_id': request.user_id,
         }
 
         pubsub_manager.publish(Topics.DATA_UPLOAD_REQUESTS, {
@@ -99,12 +132,16 @@ def dataframe_to_json_safe(df, max_rows=None):
 
 # 2) Get analysis status and result
 @app.route('/get_analysis_status/<job_id>', methods=['GET'])
+@firebase_auth_required
 def get_analysis_status(job_id):
     status = job_status_map.get(job_id, {'status': 'not_found', 'details': 'Job ID not found'})
     
     # Crea una copia dello status per evitare modifiche al dizionario originale
     response_status = status.copy()
     
+    if(status.get('user_id') != request.user_id):
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+
     # Convert DataFrame to JSON for preview if available
     if status.get('processed_data') is not None:
         response_status['processed_data_preview'] = dataframe_to_json_safe(status['processed_data'], max_rows=10)
@@ -154,6 +191,9 @@ def request_anonymization():
     if not job_status or job_status['status'] != 'analyzed':
         return jsonify({"error": "Job not analyzed yet or not found"}), 400
     
+    if job_status.get('user_id') != request.user_id:
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+    
     # Convert DataFrame to CSV and then to base64 for PubSub
     processed_csv_buffer = StringIO()
     job_status['processed_data'].to_csv(processed_csv_buffer, index=False)
@@ -187,6 +227,7 @@ def request_anonymization():
 
 # 4) Get anonymization status and results
 @app.route('/get_anonymization_status/<job_id>', methods=['GET'])
+@firebase_auth_required
 def get_anonymization_status(job_id):
     """Endpoint dedicato per ottenere i risultati completi dell'anonimizzazione in JSON"""
     job_status = job_status_map.get(job_id)
@@ -200,6 +241,10 @@ def get_anonymization_status(job_id):
             "details": job_status.get('details')
         }), 400
     
+    if job_status.get('user_id') != request.user_id:
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+    
+
     anonymized_data = job_status.get('anonymized_data')
     if anonymized_data is None:
         return jsonify({"error": "Anonymized data not available"}), 404
@@ -237,10 +282,13 @@ def get_anonymization_status(job_id):
 
 
 @app.route('/get_files', methods=['GET'])
+@firebase_auth_required
 def get_files():
     # Create an array of [filename, rows, anonymized_data, json of the sample, url to download formed by /download/<job_id>/full]
     files_info = []
     for job_id, status in job_status_map.items():
+        if status.get('user_id') != request.user_id:
+            continue
         if status.get('status') == 'completed':
             anonymized_data = status.get('anonymized_data')
             if anonymized_data is not None:
@@ -257,9 +305,9 @@ def get_files():
                 })
         elif status.get('status') in ['uploaded', 'analyzed', 'anonymization_requested']:
             files_info.append({
-            'job_id': job_id,
-            'filename': status.get('filename', 'unknown'),
-            'status': status.get('status'),
+                'job_id': job_id,
+                'filename': status.get('filename', 'unknown'),
+                'status': status.get('status'),
             })
     # add general statistics: number of datasets and total rows
     total_datasets = len(files_info)
@@ -270,10 +318,11 @@ def get_files():
         'total_rows': total_rows
     })
     result = []
-    result.append(stats)
-    result.append(files_info)
+    result.append({'stats': stats})
+    result.append({'files': files_info})
     return jsonify(result), 200
 
+#deprecated
 def get_anonymization_summary(job_id):
     """Endpoint per ottenere un riassunto dei risultati dell'anonimizzazione"""
     job_status = job_status_map.get(job_id)
@@ -320,6 +369,7 @@ def get_anonymization_summary(job_id):
     return jsonify(summary), 200
 
 @app.route('/download/<job_id>/full', methods=['GET'])
+@firebase_auth_required
 def download_full_file(job_id):
     try:
         job_status = job_status_map.get(job_id)
@@ -333,6 +383,9 @@ def download_full_file(job_id):
                 "details": job_status.get('details')
             }), 400
         
+        if job_status.get('user_id') != request.user_id:
+            return jsonify({"error": "Unauthorized access to this job"}), 403
+
         anonymized_data = job_status.get('anonymized_data')
         original_filename = job_status.get('filename', 'anonymized_data.csv')
 
@@ -353,7 +406,7 @@ def download_full_file(job_id):
         logger.error(f"Error downloading full anonymized file for job {job_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/download/<job_id>/sample', methods=['GET'])
+# deprecated
 def download_sample(job_id):
     try:
         job_status = job_status_map.get(job_id)
@@ -387,7 +440,7 @@ def download_sample(job_id):
         logger.error(f"Error downloading anonymized sample for job {job_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/export_anonymization_json/<job_id>', methods=['GET'])
+# deprecated
 def export_anonymization_json(job_id):
     """Endpoint per esportare i risultati dell'anonimizzazione come file JSON"""
     try:
