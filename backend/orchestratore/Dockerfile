@@ -23,4 +23,4 @@ COPY . .
 EXPOSE 8080
 
 # Run the Flask application when the container launches
-CMD ["python", "frontend_service.py"]
+CMD ["python", "orchestrator_service.py"]

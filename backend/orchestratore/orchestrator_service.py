@@ -1,4 +1,4 @@
-# frontend_service.py
+# orchestrator_service.py
 from flask import Flask, request, jsonify, render_template, send_file
 import pandas as pd
 import os
@@ -428,7 +428,7 @@ def receive_analysis_results():
                     'metadata': metadata_df,
                     'analysis_completed_at': datetime.now().isoformat()
                 })
-                logger.info(f"Frontend: Analysis results received via POST for job {job_id}")
+                logger.info(f"Analysis results received via POST for job {job_id}")
                 return jsonify({"message": "Analysis results received successfully"}), 200
             except Exception as e:
                 logger.error(f"Error processing analysis results for job {job_id}: {e}")
@@ -438,7 +438,7 @@ def receive_analysis_results():
                 })
                 return jsonify({"error": str(e)}), 400
         else:
-            logger.warning(f"Frontend: Received analysis results for unknown job {job_id}")
+            logger.warning(f"Received analysis results for unknown job {job_id}")
             return jsonify({"error": "Job ID not found"}), 404
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
@@ -482,7 +482,7 @@ def receive_anonymization_results():
                     'anonymized_sample': sample_df,
                     'anonymization_completed_at': datetime.now().isoformat()
                 })
-                logger.info(f"Frontend: Anonymization results received via POST for job {job_id}")
+                logger.info(f"Anonymization results received via POST for job {job_id}")
                 return jsonify({"message": "Anonymization results received successfully"}), 200
             except Exception as e:
                 logger.error(f"Error processing anonymization results for job {job_id}: {e}")
@@ -492,7 +492,7 @@ def receive_anonymization_results():
                 })
                 return jsonify({"error": str(e)}), 400
         else:
-            logger.warning(f"Frontend: Received anonymization results for unknown job {job_id}")
+            logger.warning(f"Received anonymization results for unknown job {job_id}")
             return jsonify({"error": "Job ID not found"}), 404
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
@@ -524,10 +524,10 @@ def receive_error_notifications():
                 'error_message': error_message,
                 'error_at': datetime.now().isoformat()
             })
-            logger.error(f"Frontend: Error notification received via POST for job {job_id} in stage {stage}")
+            logger.error(f"Error notification received via POST for job {job_id} in stage {stage}")
             return jsonify({"message": "Error notification received successfully"}), 200
         else:
-            logger.warning(f"Frontend: Received error for unknown job {job_id} in stage {stage}")
+            logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
             return jsonify({"error": "Job ID not found"}), 404
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
