@@ -324,6 +324,10 @@ resource "google_cloud_run_v2_service" "anonymizer" {
         name  = "ANONYMIZER_OUTPUT_TOPIC"
         value = google_pubsub_topic.anonymizer_output.name
       }
+      env {
+        name  = "ERROR_INFORMATIONS_TOPIC"
+        value = google_pubsub_topic.error_informations.name
+      }
       resources {
         limits = {
           memory = "1Gi"
@@ -363,7 +367,14 @@ resource "google_cloud_run_v2_service" "formatter" {
         name  = "GOOGLE_CLOUD_PROJECT_ID"
         value = var.project
       }
-      # aggiungi altre variabili env se servono
+      env {
+        name  = "FORMATTER_OUTPUT_TOPIC"
+        value = google_pubsub_topic.formatter_output.name
+      }
+      env {
+        name  = "ERROR_INFORMATIONS_TOPIC"
+        value = google_pubsub_topic.error_informations.name
+      }
       resources {
         limits = {
           memory = "1Gi"
@@ -465,20 +476,8 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         value = google_pubsub_topic.formatter_input.name
       }
       env {
-        name  = "FORMATTER_OUTPUT_SUB"
-        value = google_pubsub_subscription.formatter_output_sub.name
-      }
-      env {
         name  = "ANONYMIZER_INPUT_TOPIC"
         value = google_pubsub_topic.anonymizer_input.name
-      }
-      env {
-        name  = "ANONYMIZER_OUTPUT_SUB"
-        value = google_pubsub_subscription.anonymizer_output_sub.name
-      }
-      env {
-        name  = "ERROR_INFORMATIONS_SUB"
-        value = google_pubsub_subscription.error_informations_sub.name
       }
       env {
         name  = "GOOGLE_CLOUD_PROJECT_ID"
