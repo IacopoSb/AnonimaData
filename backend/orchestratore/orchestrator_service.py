@@ -34,6 +34,9 @@ except ImportError:
 # In-memory job status
 job_status_map: Dict[str, Dict[str, Any]] = {}
 
+
+# ==== NEW FILE FLOW ====
+# 1) Upload of a new file to be analyzed
 @app.route('/upload_and_analyze', methods=['POST'])
 def upload_and_analyze():
     if 'file' not in request.files:
@@ -94,6 +97,7 @@ def dataframe_to_json_safe(df, max_rows=None):
         logger.error(f"Error converting DataFrame to JSON: {e}")
         return None
 
+# 2) Get analysis status and result
 @app.route('/get_analysis_status/<job_id>', methods=['GET'])
 def get_analysis_status(job_id):
     status = job_status_map.get(job_id, {'status': 'not_found', 'details': 'Job ID not found'})
@@ -134,100 +138,7 @@ def get_analysis_status(job_id):
     
     return jsonify(response_status), 200
 
-@app.route('/get_anonymization_results/<job_id>', methods=['GET'])
-def get_anonymization_results(job_id):
-    """Endpoint dedicato per ottenere i risultati completi dell'anonimizzazione in JSON"""
-    job_status = job_status_map.get(job_id)
-    
-    if not job_status:
-        return jsonify({"error": "Job not found"}), 404
-    
-    if job_status.get('status') != 'completed':
-        return jsonify({
-            "error": f"Anonymization not completed. Current status: {job_status.get('status')}",
-            "details": job_status.get('details')
-        }), 400
-    
-    anonymized_data = job_status.get('anonymized_data')
-    if anonymized_data is None:
-        return jsonify({"error": "Anonymized data not available"}), 404
-    
-    # Parametri per la paginazione (opzionali)
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 100, type=int)
-    start_idx = (page - 1) * per_page
-    end_idx = start_idx + per_page
-    
-    # Prepara la risposta JSON completa
-    response_data = {
-        'job_id': job_id,
-        'status': job_status.get('status'),
-        'method_used': job_status.get('method_used'),
-        'params_used': job_status.get('params_used'),
-        'anonymization_completed_at': job_status.get('anonymization_completed_at'),
-        'data_info': {
-            'total_rows': len(anonymized_data),
-            'total_columns': len(anonymized_data.columns),
-            'columns': list(anonymized_data.columns)
-        },
-        'pagination': {
-            'page': page,
-            'per_page': per_page,
-            'total_pages': (len(anonymized_data) + per_page - 1) // per_page,
-            'has_next': end_idx < len(anonymized_data),
-            'has_prev': page > 1
-        },
-        'data': dataframe_to_json_safe(anonymized_data.iloc[start_idx:end_idx])
-    }
-    
-    return jsonify(response_data), 200
-
-@app.route('/get_anonymization_summary/<job_id>', methods=['GET'])
-def get_anonymization_summary(job_id):
-    """Endpoint per ottenere un riassunto dei risultati dell'anonimizzazione"""
-    job_status = job_status_map.get(job_id)
-    
-    if not job_status:
-        return jsonify({"error": "Job not found"}), 404
-    
-    if job_status.get('status') != 'completed':
-        return jsonify({
-            "error": f"Anonymization not completed. Current status: {job_status.get('status')}",
-            "details": job_status.get('details')
-        }), 400
-    
-    original_data = job_status.get('processed_data')
-    anonymized_data = job_status.get('anonymized_data')
-    
-    if original_data is None or anonymized_data is None:
-        return jsonify({"error": "Data not available for comparison"}), 404
-    
-    # Calcola statistiche di confronto
-    summary = {
-        'job_id': job_id,
-        'filename': job_status.get('filename'),
-        'method_used': job_status.get('method_used'),
-        'params_used': job_status.get('params_used'),
-        'anonymization_completed_at': job_status.get('anonymization_completed_at'),
-        'original_data': {
-            'rows': len(original_data),
-            'columns': len(original_data.columns),
-            'columns_list': list(original_data.columns)
-        },
-        'anonymized_data': {
-            'rows': len(anonymized_data),
-            'columns': len(anonymized_data.columns),
-            'columns_list': list(anonymized_data.columns)
-        },
-        'sample_data': dataframe_to_json_safe(anonymized_data, max_rows=5),
-        'data_reduction': {
-            'rows_retained': len(anonymized_data) / len(original_data) if len(original_data) > 0 else 0,
-            'columns_retained': len(anonymized_data.columns) / len(original_data.columns) if len(original_data.columns) > 0 else 0
-        }
-    }
-    
-    return jsonify(summary), 200
-
+# 3) Request anonymization passing job id and parameters
 @app.route('/request_anonymization', methods=['POST'])
 def request_anonymization():
     data = request.json
@@ -274,7 +185,140 @@ def request_anonymization():
     
     return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
 
-# Download endpoints remain the same as before
+# 4) Get anonymization status and results
+@app.route('/get_anonymization_status/<job_id>', methods=['GET'])
+def get_anonymization_status(job_id):
+    """Endpoint dedicato per ottenere i risultati completi dell'anonimizzazione in JSON"""
+    job_status = job_status_map.get(job_id)
+    
+    if not job_status:
+        return jsonify({"error": "Job not found"}), 404
+    
+    if job_status.get('status') != 'completed':
+        return jsonify({
+            "error": f"Anonymization not completed. Current status: {job_status.get('status')}",
+            "details": job_status.get('details')
+        }), 400
+    
+    anonymized_data = job_status.get('anonymized_data')
+    if anonymized_data is None:
+        return jsonify({"error": "Anonymized data not available"}), 404
+    
+    # Parametri per la paginazione (opzionali)
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 100, type=int)
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    
+    # Prepara la risposta JSON completa
+    response_data = {
+        'job_id': job_id,
+        'status': job_status.get('status'),
+        'method_used': job_status.get('method_used'),
+        'params_used': job_status.get('params_used'),
+        'anonymization_completed_at': job_status.get('anonymization_completed_at'),
+        'data_info': {
+            'total_rows': len(anonymized_data),
+            'total_columns': len(anonymized_data.columns),
+            'columns': list(anonymized_data.columns)
+        },
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (len(anonymized_data) + per_page - 1) // per_page,
+            'has_next': end_idx < len(anonymized_data),
+            'has_prev': page > 1
+        },
+        'data': dataframe_to_json_safe(anonymized_data.iloc[start_idx:end_idx])
+    }
+    
+    return jsonify(response_data), 200
+
+
+
+@app.route('/get_files', methods=['GET'])
+def get_files():
+    # Create an array of [filename, rows, anonymized_data, json of the sample, url to download formed by /download/<job_id>/full]
+    files_info = []
+    for job_id, status in job_status_map.items():
+        if status.get('status') == 'completed':
+            anonymized_data = status.get('anonymized_data')
+            if anonymized_data is not None:
+                sample_data = dataframe_to_json_safe(anonymized_data.head(10))
+                files_info.append({
+                    'job_id': job_id,
+                    'filename': status.get('filename', 'anonymized_data.csv'),
+                    'status': status.get('status'),
+                    'method_used': status.get('method_used'),
+                    'rows': len(anonymized_data),
+                    'columns': len(anonymized_data.columns),
+                    'sample_data': sample_data,
+                    'download_url': f"/download/{job_id}/full"
+                })
+        elif status.get('status') in ['uploaded', 'analyzed', 'anonymization_requested']:
+            files_info.append({
+            'job_id': job_id,
+            'filename': status.get('filename', 'unknown'),
+            'status': status.get('status'),
+            })
+    # add general statistics: number of datasets and total rows
+    total_datasets = len(files_info)
+    total_rows = sum(file['rows'] for file in files_info if 'rows' in file)
+    stats = []
+    stats.append({
+        'datasets': total_datasets,
+        'total_rows': total_rows
+    })
+    result = []
+    result.append(stats)
+    result.append(files_info)
+    return jsonify(result), 200
+
+def get_anonymization_summary(job_id):
+    """Endpoint per ottenere un riassunto dei risultati dell'anonimizzazione"""
+    job_status = job_status_map.get(job_id)
+    
+    if not job_status:
+        return jsonify({"error": "Job not found"}), 404
+    
+    if job_status.get('status') != 'completed':
+        return jsonify({
+            "error": f"Anonymization not completed. Current status: {job_status.get('status')}",
+            "details": job_status.get('details')
+        }), 400
+    
+    original_data = job_status.get('processed_data')
+    anonymized_data = job_status.get('anonymized_data')
+    
+    if original_data is None or anonymized_data is None:
+        return jsonify({"error": "Data not available for comparison"}), 404
+    
+    # Calcola statistiche di confronto
+    summary = {
+        'job_id': job_id,
+        'filename': job_status.get('filename'),
+        'method_used': job_status.get('method_used'),
+        'params_used': job_status.get('params_used'),
+        'anonymization_completed_at': job_status.get('anonymization_completed_at'),
+        'original_data': {
+            'rows': len(original_data),
+            'columns': len(original_data.columns),
+            'columns_list': list(original_data.columns)
+        },
+        'anonymized_data': {
+            'rows': len(anonymized_data),
+            'columns': len(anonymized_data.columns),
+            'columns_list': list(anonymized_data.columns)
+        },
+        'sample_data': dataframe_to_json_safe(anonymized_data, max_rows=5),
+        'data_reduction': {
+            'rows_retained': len(anonymized_data) / len(original_data) if len(original_data) > 0 else 0,
+            'columns_retained': len(anonymized_data.columns) / len(original_data.columns) if len(original_data.columns) > 0 else 0
+        }
+    }
+    
+    return jsonify(summary), 200
+
 @app.route('/download/<job_id>/full', methods=['GET'])
 def download_full_file(job_id):
     try:
@@ -309,7 +353,7 @@ def download_full_file(job_id):
         logger.error(f"Error downloading full anonymized file for job {job_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/download_sample/<job_id>', methods=['GET'])
+@app.route('/download/<job_id>/sample', methods=['GET'])
 def download_sample(job_id):
     try:
         job_status = job_status_map.get(job_id)
@@ -391,7 +435,9 @@ def export_anonymization_json(job_id):
         logger.error(f"Error exporting JSON for job {job_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# NEW: Endpoints per ricevere i risultati via POST
+
+# === PUB/SUB ENDPOINTS ===
+# From formatter
 @app.route('/receive_analysis_results', methods=['POST'])
 def receive_analysis_results():
     envelope = request.get_json()
@@ -444,6 +490,7 @@ def receive_analysis_results():
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
         return 'Bad Request', 400
 
+# From anonymizer
 @app.route('/receive_anonymization_results', methods=['POST'])
 def receive_anonymization_results():
     envelope = request.get_json()
@@ -498,7 +545,7 @@ def receive_anonymization_results():
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
         return 'Bad Request', 400
 
-
+# Error handler
 @app.route('/receive_error_notifications', methods=['POST'])
 def receive_error_notifications():
     envelope = request.get_json()
