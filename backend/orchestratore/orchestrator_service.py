@@ -15,9 +15,7 @@ import psycopg2
 import psycopg2.extras
 from google.cloud import storage
 
-
-
-# Configurations (enviroment variables))
+# Configurations (environment variables)
 DB_HOST = os.environ.get("DB_HOST")
 DB_NAME = os.environ.get("DB_NAME")
 DB_USER = os.environ.get("DB_USER")
@@ -28,18 +26,17 @@ FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
-
 def get_db_connection():
     return psycopg2.connect(
         host=DB_HOST,
         dbname=DB_NAME,
         user=DB_USER,
-        password=DB_PASSWORD
+        password=DB_PASSWORD,
+        cursor_factory=psycopg2.extras.RealDictCursor
     )
 
 def init_db():
-     with get_db_connection() as conn:
+    with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -67,7 +64,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# Initialize Firebase Admin SDK
 firebase_admin.initialize_app()
+
+# Initialize Google Cloud Storage client
+storage_client = storage.Client()
 
 def firebase_auth_required(f):
     from functools import wraps
@@ -86,21 +87,16 @@ def firebase_auth_required(f):
             return jsonify({"error": "Invalid auth token"}), 401
     return decorated_function
 
-from google_pubsub_manager import get_pubsub_manager, Topics
-pubsub_manager = get_pubsub_manager()
-
+# Initialize PubSub Manager
 try:
     from google_pubsub_manager import get_pubsub_manager, Topics
     pubsub_manager = get_pubsub_manager()
     logger.info("PubSub Manager initialized for publishing.")
 except ImportError:
     logger.warning("google_pubsub_manager not found. Publishing capabilities might be disabled.")
-    pubsub_manager = None # O gestisci l'errore diversamente se è critico
-
-
+    pubsub_manager = None
 
 # ==== NEW FILE FLOW ====
-# 1) Upload of a new file to be analyzed
 @app.route('/upload_and_analyze', methods=['POST'])
 @firebase_auth_required
 def upload_and_analyze():
@@ -112,26 +108,28 @@ def upload_and_analyze():
         return jsonify({"error": "No selected file"}), 400
 
     if file:
-        job_id = str(uuid.uuid4() + '-' + datetime.now().strftime("%Y%m%d%H%M%S"))
+        job_id = str(uuid.uuid4()) + '-' + datetime.now().strftime("%Y%m%d%H%M%S")
         original_filename = file.filename
 
         file_content_bytes = file.read()
         encoded_file_content = base64.b64encode(file_content_bytes).decode('utf-8')
 
         upload_at = datetime.now().isoformat()
-        conn = get_db_connection()
-        conn.execute('''
-            INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (job_id, request.user_id, original_filename, 0, None, None, None, None, None, upload_at, None, 'uploaded'))
-        conn.commit()
-        conn.close()
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (job_id, request.user_id, original_filename, 0, None, None, None, None, None, upload_at, None, 'uploaded'))
+                conn.commit()
 
-        pubsub_manager.publish(Topics.DATA_UPLOAD_REQUESTS, {
-            'job_id': job_id,
-            'filename': original_filename,
-            'file_content_base64': encoded_file_content
-        }, attributes={'job_id': job_id})
+        if pubsub_manager:
+            pubsub_manager.publish(Topics.DATA_UPLOAD_REQUESTS, {
+                'job_id': job_id,
+                'filename': original_filename,
+                'file_content_base64': encoded_file_content
+            }, attributes={'job_id': job_id})
 
         return jsonify({
             "message": "File uploaded and analysis initiated",
@@ -139,13 +137,76 @@ def upload_and_analyze():
             "filename": original_filename
         }), 202
 
+@app.route('/request_anonymization', methods=['POST'])
+@firebase_auth_required
+def request_anonymization():
+    data = request.json
+    job_id = data.get('job_id')
+    method = data.get('method')
+    params = data.get('params')
+    user_selections = data.get('user_selections')
+
+    if not all([job_id, method, user_selections is not None]):
+        return jsonify({"error": "Missing job_id, method, or user_selections"}), 400
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+            job = cur.fetchone()
+    
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job['user_id'] != request.user_id:
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+    if job['status'] != 'analyzed':
+        return jsonify({"error": "Job is not ready for anonymization"}), 400
+
+    # Download processed file from GCP bucket
+    gcp_path = job['path_file_analyzed']
+    if not gcp_path:
+        return jsonify({"error": "No analyzed file path found for this job"}), 400
+
+    try:
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(gcp_path)
+        processed_csv_content = blob.download_as_text()
+        encoded_processed_csv = base64.b64encode(processed_csv_content.encode('utf-8')).decode('utf-8')
+
+        # Fix: metadata is already a JSON string, not a DataFrame
+        metadata_json_content = job['metadata']
+        encoded_metadata_json = base64.b64encode(metadata_json_content.encode('utf-8')).decode('utf-8')
+
+        if pubsub_manager:
+            pubsub_manager.publish(Topics.ANONYMIZATION_REQUESTS, {
+                'job_id': job_id,
+                'method': method,
+                'params': params,
+                'user_selections': user_selections,
+                'processed_data_content_base64': encoded_processed_csv,
+                'metadata_content_base64': encoded_metadata_json
+            }, attributes={'job_id': job_id})
+
+        # Update job status
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('UPDATE jobs SET status = %s, method = %s WHERE job_id = %s', 
+                           ('anonymization_requested', method, job_id))
+                conn.commit()
+
+        return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
+    
+    except Exception as e:
+        logger.error(f"Error in request_anonymization: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/get_status/<job_id>', methods=['GET'])
 @firebase_auth_required
 def get_status(job_id):
-    conn = get_db_connection()
-    job = conn.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+            job = cur.fetchone()
+    
     if not job:
         return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
     if job['user_id'] != request.user_id:
@@ -164,75 +225,14 @@ def get_status(job_id):
     }
     return jsonify(response_status), 200
 
-@app.route('/request_anonymization', methods=['POST'])
-@firebase_auth_required
-def request_anonymization():
-    data = request.json
-    job_id = data.get('job_id')
-    method = data.get('method')
-    params = data.get('params')
-    user_selections = data.get('user_selections')
-
-    if not all([job_id, method, user_selections is not None]):
-        return jsonify({"error": "Missing job_id, method, or user_selections"}), 400
-
-    conn = get_db_connection()
-    job = conn.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
-    if not job:
-        conn.close()
-        return jsonify({"error": "Job not found"}), 404
-    if job['user_id'] != request.user_id:
-        conn.close()
-        return jsonify({"error": "Unauthorized access to this job"}), 403
-    if job['status'] != 'analyzed':
-        conn.close()
-        return jsonify({"error": "Job is not ready for anonymization"}), 400
-
-       
-    # Download processed file from GCP bucket at path job['path_file_analyzed']
-    gcp_path = job['path_file_analyzed']
-    if not gcp_path:
-        conn.close()
-        return jsonify({"error": "No analyzed file path found for this job"}), 400
-
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(BUCKET_NAME)
-    blob = bucket.blob(gcp_path)
-    processed_csv_content = blob.download_as_text()
-    encoded_processed_csv = base64.b64encode(processed_csv_content.encode('utf-8')).decode('utf-8')
-
-    metadata_json_buffer = StringIO()
-    job['metadata'].to_json(metadata_json_buffer, orient='records', indent=4)
-    metadata_json_content = metadata_json_buffer.getvalue()
-    encoded_metadata_json = base64.b64encode(metadata_json_content.encode('utf-8')).decode('utf-8')
-
-    pubsub_manager.publish(Topics.ANONYMIZATION_REQUESTS, {
-        'job_id': job_id,
-        'method': method,
-        'params': params,
-        'user_selections': user_selections,
-        'processed_data_content_base64': encoded_processed_csv,
-        'metadata_content_base64': encoded_metadata_json
-    }, attributes={'job_id': job_id})
-
-    # Update job status to 'anonymization_requested'
-    conn = get_db_connection()
-    conn.execute('UPDATE jobs SET status = ?, method_used = ? WHERE job_id = ?', ('anonymization_requested', method, job_id))
-    conn.commit()
-    conn.close()
-
-    return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
-
-
-
-
-
 @app.route('/get_files', methods=['GET'])
 @firebase_auth_required
 def get_files():
-    conn = get_db_connection()
-    jobs = conn.execute('SELECT * FROM jobs WHERE user_id = ?', (request.user_id,)).fetchall()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM jobs WHERE user_id = %s', (request.user_id,))
+            jobs = cur.fetchall()
+    
     files_info = []
     for job in jobs:
         if job['status'] == 'anonymized':
@@ -240,9 +240,9 @@ def get_files():
                 'job_id': job['job_id'],
                 'filename': job['filename'],
                 'status': job['status'],
-                'method_used': job['method_used'],
+                'method': job['method'],
                 'rows': job['rows'],
-                'download_url': f"/download/{job['job_id']}/full"
+                'download_url': f"/download/{job['job_id']}"
             })
         else:
             files_info.append({
@@ -250,6 +250,7 @@ def get_files():
                 'filename': job['filename'],
                 'status': job['status']
             })
+    
     total_datasets = len(files_info)
     total_rows = sum(file.get('rows', 0) for file in files_info if file.get('rows'))
     stats = [{'datasets': total_datasets, 'total_rows': total_rows}]
@@ -259,9 +260,11 @@ def get_files():
 @app.route('/download/<job_id>', methods=['GET'])
 @firebase_auth_required
 def download_full_file(job_id):
-    conn = get_db_connection()
-    job = conn.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+            job = cur.fetchone()
+    
     if not job:
         return jsonify({"error": "Job not found"}), 404
     if job['user_id'] != request.user_id:
@@ -269,20 +272,25 @@ def download_full_file(job_id):
     if job['status'] != 'anonymized':
         return jsonify({"error": "File not ready. Still processing."}), 400
     
-    # Download the file from the gcp bucket
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(BUCKET_NAME)
-    blob = bucket.blob(job['path_file_anonymized'])
-    if not blob.exists():
-        return jsonify({"error": "Anonymized file not found in GCP bucket"}), 404
-    file_content = blob.download_as_text()
-    download_name = job['filename'] if job['filename'] else f"anonymized_file_{job_id}.csv"
-    return send_file(
-        BytesIO(file_content.encode("utf-8")),
-        as_attachment=True,
-        download_name=download_name,
-        mimetype='text/csv'
-    )
+    try:
+        # Download the file from GCP bucket
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(job['path_file_anonymized'])
+        if not blob.exists():
+            return jsonify({"error": "Anonymized file not found in GCP bucket"}), 404
+        
+        file_content = blob.download_as_text()
+        download_name = job['filename'] if job['filename'] else f"anonymized_file_{job_id}.csv"
+        
+        return send_file(
+            BytesIO(file_content.encode("utf-8")),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype='text/csv'
+        )
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}")
+        return jsonify({"error": "Error downloading file"}), 500
 
 # === PUB/SUB ENDPOINTS ===
 @app.route('/receive_analysis_results', methods=['POST'])
@@ -291,53 +299,62 @@ def receive_analysis_results():
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
         return 'Bad Request', 400
+    
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
         message_data = json.loads(payload)
-        logger.info(f"Received Pub/Sub push: {message_data}")
+        logger.info(f"Received analysis results: {message_data}")
+        
         data = message_data.get('data')
         job_id = data.get('job_id')
         processed_data_content_base64 = data.get('processed_data_content_base64')
         metadata_content_base64 = data.get('metadata_content_base64')
         dataset_info = data.get('dataset_info')
 
-        # Check if the job_id is present in the db
-        conn = get_db_connection()
-        job = conn.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+        # Check if the job exists
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+                job = cur.fetchone()
+        
         if not job:
             logger.warning(f"Received analysis results for unknown job {job_id}")
-            conn.close()
             return jsonify({"error": "Job ID not found"}), 404
+
         try:
-            # Decode and convert to DataFrame
+            # Decode and process data
             processed_csv = base64.b64decode(processed_data_content_base64).decode('utf-8')
             processed_df = pd.read_csv(StringIO(processed_csv))
             
             metadata_json = base64.b64decode(metadata_content_base64).decode('utf-8')
 
-            # Save process data to the bucket
+            # Save processed data to GCP bucket
             gcp_path = f"processed_data/{job_id}/processed_data.csv"
-            storage_client = storage.Client()
             bucket = storage_client.bucket(BUCKET_NAME)
             blob = bucket.blob(gcp_path)
             blob.upload_from_string(processed_df.to_csv(index=False), content_type='text/csv')
             
-            # Update job status, save processed data path and save metadata to the db
-            conn.execute('''
-                UPDATE jobs
-                SET status = ?, path_file_analyzed = ?, metadata = ?, rows = ?
-                WHERE job_id = ?
-            ''', ('analyzed', gcp_path, metadata_json, len(processed_df), job_id))
-            conn.commit()
+            # Update job in database
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('''
+                        UPDATE jobs
+                        SET status = %s, path_file_analyzed = %s, metadata = %s, rows = %s
+                        WHERE job_id = %s
+                    ''', ('analyzed', gcp_path, metadata_json, len(processed_df), job_id))
+                    conn.commit()
+            
             return jsonify({"message": "Analysis results received successfully"}), 200
+            
         except Exception as e:
             logger.error(f"Error processing analysis results for job {job_id}: {e}")
-            conn.execute('UPDATE jobs SET status = ? WHERE job_id = ?', ('error', job_id))
-            conn.commit()
-            return jsonify({"error": str(e)}), 400
-        finally:
-            conn.close()
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('UPDATE jobs SET status = %s WHERE job_id = %s', ('error', job_id))
+                    conn.commit()
+            return jsonify({"error": str(e)}), 500
+            
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
         return 'Bad Request', 400
@@ -348,46 +365,50 @@ def receive_anonymization_results():
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
         return 'Bad Request', 400
+    
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
         message_data = json.loads(payload)
-        logger.info(f"Received Pub/Sub push: {message_data}")
+        logger.info(f"Received anonymization results: {message_data}")
+        
         data = message_data.get('data')
         job_id = data.get('job_id')
         anonymized_file_content_base64 = data.get('anonymized_file_content_base64')
         anonymized_sample_content_base64 = data.get('anonymized_sample_content_base64')
         completed_at = datetime.now().isoformat()
 
+        # Decode data
         anonymized_csv = base64.b64decode(anonymized_file_content_base64).decode('utf-8')
         anonymized_df = pd.read_csv(StringIO(anonymized_csv))
 
         anonymized_sample_csv = base64.b64decode(anonymized_sample_content_base64).decode('utf-8')
         anonymized_sample_df = pd.read_csv(StringIO(anonymized_sample_csv))
 
-        # Save the anonynized file to GCP bucket
+        # Save anonymized file to GCP bucket
         gcp_path = f"anonymized_data/{job_id}/anonymized_data.csv"
-        storage_client = storage.Client()
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(gcp_path)
         blob.upload_from_string(anonymized_df.to_csv(index=False), content_type='text/csv')
 
-        # Save the anonymized sample to the database
+        # Save anonymized sample to database
         anonymized_preview_json = anonymized_sample_df.to_json(orient='records', indent=4)
 
-        # Update the ùDB with the new status, sample, completed at time, path and preview
-        conn = get_db_connection()
-        conn.execute('''
-            UPDATE jobs
-            SET status = ?, anonymized_preview = ?, path_file_anonymized = ?, completed_at = ?
-            WHERE job_id = ?
-        ''', ('anonymized', anonymized_preview_json, gcp_path, completed_at, job_id))
+        # Update database
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    UPDATE jobs
+                    SET status = %s, anonymized_preview = %s, path_file_anonymized = %s, completed_at = %s
+                    WHERE job_id = %s
+                ''', ('anonymized', anonymized_preview_json, gcp_path, completed_at, job_id))
+                conn.commit()
 
-
-        logger.info(f"Anonymization results received via POST for job {job_id}")
+        logger.info(f"Anonymization results received for job {job_id}")
         return jsonify({"message": "Anonymization results received successfully"}), 200
+        
     except Exception as e:
-        logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
+        logger.error(f"Failed to process anonymization results: {e}", exc_info=True)
         return 'Bad Request', 400
 
 @app.route('/receive_error_notifications', methods=['POST'])
@@ -396,6 +417,7 @@ def receive_error_notifications():
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
         return 'Bad Request', 400
+    
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
@@ -409,20 +431,23 @@ def receive_error_notifications():
         if not job_id or not stage or not error_message:
             logger.error("Missing job_id, stage or error message in Pub/Sub notification")
             return jsonify({"error": "Missing job_id, stage or error message"}), 400
-        # Check if the job_id is present in the db
-        conn = get_db_connection()
-        job = conn.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
-        if job:
-            # Update the job status to 'error' and log the error message
-            conn.execute('UPDATE jobs SET status = ?, completed_at = ? WHERE job_id = ?', ('error', datetime.now().isoformat(), job_id))
-            conn.commit()
-            conn.close()
-        
-            logger.error(f"Error notification received via POST for job {job_id} in stage {stage}")
-            return jsonify({"message": "Error notification received successfully"}), 200
-        else:
-            logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
-            return jsonify({"error": "Job ID not found"}), 404
+
+        # Update job status to error
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT job_id FROM jobs WHERE job_id = %s', (job_id,))
+                job = cur.fetchone()
+                
+                if job:
+                    cur.execute('UPDATE jobs SET status = %s, completed_at = %s WHERE job_id = %s', 
+                               ('error', datetime.now().isoformat(), job_id))
+                    conn.commit()
+                    logger.error(f"Error notification received for job {job_id} in stage {stage}: {error_message}")
+                    return jsonify({"message": "Error notification received successfully"}), 200
+                else:
+                    logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
+                    return jsonify({"error": "Job ID not found"}), 404
+                    
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
         return 'Bad Request', 400
