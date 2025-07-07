@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, AlertCircle, Clock, Database, FileText } from 'lucide-react';
-import { uploadFile, getFiles, anonymizeData, downloadFile } from './api';
+import { uploadFile, getFiles, anonymizeData, downloadFile,checkJobStatus  } from './api';
 
 
 
@@ -34,16 +34,7 @@ const anonymizationAlgorithms = [
       { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
     ]
   },
-  // T-CLONESESS is not implemented 
-  // { 
-  //   id: 't-closeness', 
-  //   name: 'T-Closeness', 
-  //   description: 'Distribution of sensitive attribute in each group close to overall distribution',
-  //   params: [
-  //     { name: 't', type: 'number', min: 0.1, max: 1, step: 0.1, default: 0.3, description: 'Closeness threshold' },
-  //     { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
-  //   ]
-  // },
+ 
   { 
     id: 'differential-privacy', 
     name: 'Differential Privacy', 
@@ -71,6 +62,11 @@ const AnonimaData = () => {
   completedJobs: 0,
   dataProtected: 0
   });
+  // stati per il polling
+  const [jobId, setJobId] = useState(null);
+  const [pollingInterval, setPollingInterval] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processingMessage, setProcessingMessage] = useState('');
 
   // Load Firebase SDK and initialize
   useEffect(() => {
@@ -176,31 +172,40 @@ const AnonimaData = () => {
     }
   };
 
-  // File upload handler
+
+  // File upload handler POLLING
   const handleFileUpload = async (event) => {
-  const file = event.target.files[0];
+    const file = event.target.files[0];
 
-  if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
-    setUploadedFile(file);
+    if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
+      setUploadedFile(file);
+      setUploadProgress(0);
 
-    const formData = new FormData();
-    formData.append('file', file);
+      const formData = new FormData();
+      formData.append('file', file);
 
-    try {
-      const response = await uploadFile(formData);
+      try {
+        const response = await uploadFile(formData);
 
-      setDataPreview({
-        columns: response.colonna || [],
-        rows: response.sample || []
-      });
-
-      setCurrentView('configure');
-    } catch (error) {
-      console.error('Errore durante l’upload del file:', error);
-      
+        if (response.idJob) {
+          // Il backend restituisce un idJob, avvia il polling
+          startPolling(response.idJob);
+          setCurrentView('processing');
+        } else {
+          // Fallback per compatibilità con API che restituiscono dati direttamente
+          setDataPreview({
+            columns: response.colonna || response.columns || [],
+            rows: response.sample || response.rows || []
+          });
+          setCurrentView('configure');
+        }
+      } catch (error) {
+        console.error('Errore durante l\'upload del file:', error);
+        setProcessingStatus('error');
+        setProcessingMessage('Failed to upload file. Please try again.');
+      }
     }
-  }
-};
+  };
 
   // Algorithm parameter change handler
   const handleParamChange = (paramName, value) => {
@@ -218,39 +223,218 @@ const AnonimaData = () => {
     }));
   };
 
+
+// Funzione per avviare il polling
+const startPolling = (jobId) => {
+  setJobId(jobId);
+  setProcessingStatus('processing');
+  setProcessingMessage('Analyzing your dataset...');
+  
+  const interval = setInterval(async () => {
+    try {
+      const response = await checkJobStatus(jobId);
+      console.log("Polling status:", response.status);
+      
+      // La risposta contiene: { idJob, status, ...otherData }
+      if (response.status === 'analized') {
+        // Analisi completata - ferma il polling
+        setProcessingStatus('completed');
+        setProcessingMessage('Analysis completed successfully!');
+        setUploadProgress(100);
+        
+        // Aggiorna i dati con le informazioni ricevute
+        setDataPreview({
+          columns: response.columns || response.colonna || [],
+          rows: response.sample || response.rows || []
+        });
+        
+        // Ferma il polling
+        clearInterval(interval);
+        setPollingInterval(null);
+        
+        // Passa automaticamente alla configurazione
+        setCurrentView('configure');
+        
+      } else if (response.status === 'anonymized' || response.status === 'completed') {
+        // Anonimizzazione completata - ferma il polling
+        setProcessingStatus('completed');
+        setProcessingMessage('Anonymization completed successfully!');
+        setUploadProgress(100);
+        
+        // Aggiorna i dati anonimizzati
+        setAnonymizedPreview({
+          columns: response.columns || response.colonna || dataPreview.columns,
+          rows: response.dati_anonimizzati || response.anonymized_data || []
+        });
+        
+        // Ferma il polling
+        clearInterval(interval);
+        setPollingInterval(null);
+        
+        // Rimani nella vista preview per mostrare i risultati
+        // setCurrentView('preview'); // già impostato in handleAnonymize
+        
+      } else {
+        // Ancora in elaborazione
+        if (response.status === 'processing_anonymization') {
+          setProcessingMessage('Applying anonymization algorithm...');
+        } else {
+          setProcessingMessage('Processing your data...');
+        }
+        // Puoi aggiungere altri stati se il backend li fornisce
+      }
+    } catch (error) {
+      console.error('Polling error:', error);
+      // Continua il polling anche in caso di errore di rete
+      setProcessingMessage('Checking status...');
+    }
+  }, 1000); // Poll ogni secondo
+  
+  setPollingInterval(interval);
+};
+ useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
+
+/*
+    // Funzione per avviare il polling
+  const startPolling = (jobId) => {
+    setJobId(jobId);
+    setProcessingStatus('processing');
+    setProcessingMessage('Analyzing your dataset...');
+    
+    const interval = setInterval(async () => {
+      try {
+        const response = await checkJobStatus(jobId);
+        console.log("Polling status:", response.status);
+        
+        // La risposta contiene: { idJob, status, ...otherData }
+        if (response.status === 'analized') {
+          // Analisi completata - ferma il polling
+          setProcessingStatus('completed');
+          setProcessingMessage('Analysis completed successfully!');
+          setUploadProgress(100);
+          
+          // Aggiorna i dati con le informazioni ricevute
+          setDataPreview({
+            columns: response.columns || response.colonna || [],
+            rows: response.sample || response.rows || []
+          });
+          
+          // Ferma il polling
+          clearInterval(interval);
+          setPollingInterval(null);
+          
+          // Passa automaticamente alla configurazione
+          setCurrentView('configure');
+          
+        } else {
+          // Ancora in elaborazione
+          setProcessingMessage('Analyzing your data...');
+          // Puoi aggiungere altri stati se il backend li fornisce
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+        // Continua il polling anche in caso di errore di rete
+        setProcessingMessage('Checking status...');
+      }
+    }, 1000); // Poll ogni secondo
+    
+    setPollingInterval(interval);
+  };
+*/
+  // Ferma il polling quando il componente viene smontato
+ 
+
+
+
+/*
   // Process anonymization
-  const handleAnonymize = async () => {
+    const handleAnonymize = async () => {
+      setProcessingStatus('processing');
+      setCurrentView('preview');
+      setProcessingMessage('Starting anonymization process...');
+
+      try {
+        const params = {
+          algorithm: selectedAlgorithm,
+          params: algorithmParams,
+          filename: uploadedFile?.name || '',
+          job_id: jobId // Passa il job_id se disponibile
+        };
+
+        const response = await anonymizeData(params);
+
+        if (response.job_id) {
+          // Se viene restituito un nuovo job_id, avvia il polling
+          startPolling(response.job_id);
+        } else {
+          // Risultati immediati (fallback)
+          setAnonymizedPreview({
+            columns: response.colonna || dataPreview.columns,
+            rows: response.dati_anonimizzati || []
+          });
+          setProcessingStatus('completed');
+        }
+      } catch (error) {
+        console.error('Errore anonimizzazione:', error);
+        setProcessingStatus('error');
+        setProcessingMessage('Anonymization failed. Please try again.');
+      }
+    };
+*/
+  // Process anonymization modificato
+const handleAnonymize = async () => {
   setProcessingStatus('processing');
   setCurrentView('preview');
+  setProcessingMessage('Starting anonymization process...');
 
   try {
-    // parametri da inviare all'API 
+    // Prepara la userSelection con le informazioni delle checkbox
+    const userSelection = {};
+    
+    // Per ogni colonna, aggiungi le informazioni sui checkbox selezionati
+    dataPreview.columns.forEach(column => {
+      userSelection[column] = {
+        quasi: columnConfig[column]?.quasi || false,
+        sensitive: columnConfig[column]?.sensitive || false
+      };
+    });
+
     const params = {
       algorithm: selectedAlgorithm,
       params: algorithmParams,
-      
       filename: uploadedFile?.name || '',
-      
+      job_id: jobId, // Passa il job_id se disponibile
+      userSelection: userSelection // Aggiungi le selezioni dell'utente
     };
 
-    // Chiamata reale all'API
+    console.log('Sending anonymization request with userSelection:', userSelection);
+
     const response = await anonymizeData(params);
 
-    // Aggiorna l'anteprima con i dati anonimizzati ricevuti
-    setAnonymizedPreview({
-      columns: response.colonna || dataPreview.columns,
-      rows: response.dati_anonimizzati || [],  // attenzione ai nomi che ti manda backend
-    });
-
-    setProcessingStatus('completed');
-
+    if (response.job_id) {
+      // Se viene restituito un nuovo job_id, avvia il polling
+      startPolling(response.job_id);
+    } else {
+      // Risultati immediati (fallback)
+      setAnonymizedPreview({
+        columns: response.colonna || dataPreview.columns,
+        rows: response.dati_anonimizzati || []
+      });
+      setProcessingStatus('completed');
+    }
   } catch (error) {
     console.error('Errore anonimizzazione:', error);
     setProcessingStatus('error');
-    
-    }
-  };
-
+    setProcessingMessage('Anonymization failed. Please try again.');
+  }
+};
 
 
   const handleDownload = async (filename) => {
@@ -562,9 +746,78 @@ const AnonimaData = () => {
           </div>
         )}
 
+        
         {currentView === 'configure' && dataPreview && (
           <div className="space-y-8">
             <h2 className="text-3xl font-bold text-gray-900">Configure Anonymization</h2>
+            
+            {/* Column Configuration Table */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Column Configuration</h3>
+              <p className="text-sm text-gray-600 mb-6">Select the type for each column in your dataset</p>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left py-3 px-4 font-medium text-gray-900">Column Name</th>
+                      
+                      <th className="text-center py-3 px-4 font-medium text-gray-900">Quasi-Identifier</th>
+                      <th className="text-center py-3 px-4 font-medium text-gray-900">Sensitive</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dataPreview.columns.map((column, index) => (
+                      <tr key={column} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-4 px-4">
+                          <div className="font-medium text-gray-900">{column}</div>
+                        </td>
+                        
+                        <td className="py-4 px-4 text-center">
+                          <input
+                            type="checkbox"
+                            id={`quasi-${column}`}
+                            checked={columnConfig[column]?.quasi || false}
+                            onChange={(e) => handleColumnConfig(column, {
+                              ...columnConfig[column],
+                              quasi: e.target.checked
+                            })}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="py-4 px-4 text-center">
+                          <input
+                            type="checkbox"
+                            id={`sensitive-${column}`}
+                            checked={columnConfig[column]?.sensitive || false}
+                            onChange={(e) => handleColumnConfig(column, {
+                              ...columnConfig[column],
+                              sensitive: e.target.checked
+                            })}
+                            className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="mt-4 flex gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-blue-600 rounded"></div>
+                  <span className="text-gray-600">
+                    <strong>Quasi-Identifier:</strong> Columns that could be used to identify individuals (e.g., age, zip code)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-purple-600 rounded"></div>
+                  <span className="text-gray-600">
+                    <strong>Sensitive:</strong> Columns containing sensitive information (e.g., medical data, salary)
+                  </span>
+                </div>
+              </div>
+            </div>
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Configuration Panel */}
@@ -595,7 +848,6 @@ const AnonimaData = () => {
                 {selectedAlgorithm && (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Parameters</h3>
-                    {/* TODO: da rivedere per tabelle di parametri in input */}
                     {anonymizationAlgorithms.find(a => a.id === selectedAlgorithm)?.params.map((param) => (
                       <div key={param.name} className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -670,6 +922,69 @@ const AnonimaData = () => {
           </div>
         )}
 
+
+        {/*prova del polling dio campo*/}
+
+        {currentView === 'processing' && (
+          <div className="space-y-8">
+            <h2 className="text-3xl font-bold text-gray-900">Processing Dataset</h2>
+            
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+              <div className="text-center">
+                <div className="animate-spin w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-6"></div>
+                
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  {processingMessage}
+                </h3>
+                
+                {uploadProgress > 0 && (
+                  <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                )}
+                
+                <p className="text-gray-500 mb-6">
+                  Please wait while we process your dataset. This may take a few minutes.
+                </p>
+                
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+                  <Clock className="w-4 h-4" />
+                  <span>Job ID: {jobId}</span>
+                </div>
+                
+                <p className="text-xs text-gray-400 mt-2">
+                  We're checking every second for updates...
+                </p>
+              </div>
+            </div>
+            
+            {/* Pulsante per annullare o tornare indietro */}
+            <div className="flex justify-center">
+              <button 
+                onClick={() => {
+                  if (pollingInterval) {
+                    clearInterval(pollingInterval);
+                    setPollingInterval(null);
+                  }
+                  setCurrentView('dashboard');
+                  setProcessingStatus('idle');
+                }}
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Cancel & Return to Dashboard
+              </button>
+            </div>
+          </div>
+        )}
+
+
+
+
+
+
         {currentView === 'preview' && (
           <div className="space-y-8">
             <h2 className="text-3xl font-bold text-gray-900">Anonymization Results</h2>
@@ -677,8 +992,45 @@ const AnonimaData = () => {
             {processingStatus === 'processing' && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
                 <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing your dataset...</h3>
-                <p className="text-gray-500">This may take a few minutes depending on the dataset size.</p>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{processingMessage}</h3>
+                
+                {uploadProgress > 0 && (
+                  <div className="w-full bg-gray-200 rounded-full h-2 mb-4 max-w-md mx-auto">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                )}
+                
+                <p className="text-gray-500">Job ID: {jobId}</p>
+              </div>
+            )}
+
+
+            {processingStatus === 'error' && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-8 h-8 text-red-600" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-red-900">Processing Failed</h3>
+                    <p className="text-red-700">{processingMessage}</p>
+                  </div>
+                </div>
+                <div className="mt-4 flex gap-4">
+                  <button 
+                    onClick={() => setCurrentView('configure')}
+                    className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors"
+                  >
+                    Try Again
+                  </button>
+                  <button 
+                    onClick={() => setCurrentView('dashboard')}
+                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    Return to Dashboard
+                  </button>
+                </div>
               </div>
             )}
 
