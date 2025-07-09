@@ -3,7 +3,10 @@
 //const API_BASE_URL = 'http://localhost:5000';
 
 
-const API_BASE_URL = window?.env?.BACKEND_URL;
+export const API_BASE_URL =
+  window.RUNTIME_ENV && window.RUNTIME_ENV.API_BASE_URL
+    ? window.RUNTIME_ENV.API_BASE_URL
+    : "http://localhost:3001"; // fallback opzionale
 
 const getAuthHeader = async () => {
   /*const auth = getAuth();

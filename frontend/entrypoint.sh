@@ -1,10 +1,6 @@
 #!/bin/sh
-
-# Sostituisce $BACKEND_URL nel file env.js
-envsubst < /usr/share/nginx/html/env.js > /usr/share/nginx/html/env.runtime.js
-
-# Sovrascrivi il vecchio file
-mv /usr/share/nginx/html/env.runtime.js /usr/share/nginx/html/env.js
-
-# Avvia nginx
-exec nginx -g "daemon off;"
+set -e
+if [ -n "$BACKEND_URL" ]; then
+  sed -i "s|API_BASE_URL_PLACEHOLDER|$BACKEND_URL|g" /usr/share/nginx/html/env.js
+fi
+exec "$@"
