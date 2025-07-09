@@ -177,6 +177,7 @@ def get_analysis_status(job_id):
 
 # 3) Request anonymization passing job id and parameters
 @app.route('/request_anonymization', methods=['POST'])
+@firebase_auth_required
 def request_anonymization():
     data = request.json
     job_id = data.get('job_id')
@@ -496,7 +497,7 @@ def receive_analysis_results():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
@@ -535,13 +536,13 @@ def receive_analysis_results():
                     'status': 'error',
                     'details': f"Error processing analysis results: {str(e)}"
                 })
-                return jsonify({"error": str(e)}), 400
+                return jsonify({"error": str(e)}), 200
         else:
             logger.warning(f"Received analysis results for unknown job {job_id}")
-            return jsonify({"error": "Job ID not found"}), 404
+            return jsonify({"error": "Job ID not found"}), 200
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
 
 # From anonymizer
 @app.route('/receive_anonymization_results', methods=['POST'])
@@ -549,7 +550,7 @@ def receive_anonymization_results():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
@@ -590,13 +591,13 @@ def receive_anonymization_results():
                     'status': 'error',
                     'details': f"Error processing anonymization results: {str(e)}"
                 })
-                return jsonify({"error": str(e)}), 400
+                return jsonify({"error": str(e)}), 200
         else:
             logger.warning(f"Received anonymization results for unknown job {job_id}")
-            return jsonify({"error": "Job ID not found"}), 404
+            return jsonify({"error": "Job ID not found"}), 200
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
 
 # Error handler
 @app.route('/receive_error_notifications', methods=['POST'])
@@ -604,7 +605,7 @@ def receive_error_notifications():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
@@ -628,10 +629,10 @@ def receive_error_notifications():
             return jsonify({"message": "Error notification received successfully"}), 200
         else:
             logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
-            return jsonify({"error": "Job ID not found"}), 404
+            return jsonify({"error": "Job ID not found"}), 200
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)

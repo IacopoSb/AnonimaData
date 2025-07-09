@@ -27,6 +27,7 @@ class AnalysisService:
         job_id = data.get('job_id')
         filename = data.get('filename')
         file_content_base64 = data.get('file_content_base64')
+        user_id = data.get('user_id')
 
         logger.info(f"Analysis Service: Processing upload for job {job_id}, file {filename}")
 
@@ -58,6 +59,8 @@ class AnalysisService:
                 'status': 'analyzed',
                 'processed_data_content_base64': encoded_processed_csv,
                 'metadata_content_base64': encoded_metadata_json,
+                'user_id': user_id,
+                'filename': filename,
                 'dataset_info': {
                     'rows': len(structured_df),
                     'columns': len(structured_df.columns),
@@ -71,6 +74,7 @@ class AnalysisService:
             self.pubsub_manager.publish(Topics.ERROR_NOTIFICATIONS, {
                 'job_id': job_id,
                 'stage': 'analysis',
+                'user_id': user_id,
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
             }, attributes={'job_id': job_id})
@@ -82,7 +86,7 @@ def pubsub_push_handler():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
@@ -91,7 +95,7 @@ def pubsub_push_handler():
         service.handle_data_upload(data.get('data'))  # From pub/sub json extract only the payload relevant for app use
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     return ('', 204)
 
 if __name__ == "__main__":
