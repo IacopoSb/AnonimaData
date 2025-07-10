@@ -29,18 +29,18 @@ class AnonymizationService:
 
     def _initialize_method_schemas(self):
         self.method_schemas = {
-            'k_anonymity': {
+            'k-anonymity': {
                 'parameters': {
                     'k': {'type': 'int', 'default': 3, 'min': 2, 'max': 100, 'description': 'Minimum group size for k-anonymity'}
                 }
             },
-            'l_diversity': {
+            'l-diversity': {
                 'parameters': {
                     'k': {'type': 'int', 'default': 3, 'min': 2, 'max': 100, 'description': 'Minimum group size for k-anonymity base'},
                     'l': {'type': 'int', 'default': 2, 'min': 2, 'description': 'Minimum distinct sensitive values in each group'}
                 }
             },
-            'differential_privacy': {
+            'differential-privacy': {
                 'parameters': {
                     'epsilon': {'type': 'float', 'default': 1.0, 'min': 0.1, 'max': 10.0, 'description': 'Privacy budget (epsilon) for differential privacy'}
                 }
@@ -90,6 +90,7 @@ class AnonymizationService:
         job_id = data.get('job_id')
         method = data.get('method')
         params = data.get('params', {})
+        user_id = data.get('user_id')
         user_selections = data.get('user_selections', [])
         processed_data_content_base64 = data.get('processed_data_content_base64')
         metadata_content_base64 = data.get('metadata_content_base64')
@@ -138,12 +139,14 @@ class AnonymizationService:
                 'anonymized_sample_content_base64': encoded_anonymized_sample_csv,
                 'method_used': method,
                 'params_used': params,
+                'user_id': user_id,
                 'anonymized_at': datetime.now().isoformat()
             }, attributes={'job_id': job_id})
         except Exception as e:
             logger.error(f"Anonymization Service: Error processing job {job_id}: {e}", exc_info=True)
             self.pubsub_manager.publish(Topics.ERROR_NOTIFICATIONS, {
                 'job_id': job_id,
+                'user_id': user_id,
                 'stage': 'anonymization',
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
@@ -156,7 +159,7 @@ def pubsub_push_handler():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     pubsub_message = envelope['message']
     try:
         payload = base64.b64decode(pubsub_message['data']).decode('utf-8')
@@ -165,7 +168,7 @@ def pubsub_push_handler():
         service.handle_anonymization_request(data.get('data'))  # From pub/sub json extract only the payload relevant for app use
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     return ('', 204)
 
 if __name__ == "__main__":
