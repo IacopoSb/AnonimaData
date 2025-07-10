@@ -298,7 +298,7 @@ def receive_analysis_results():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     
     pubsub_message = envelope['message']
     try:
@@ -320,7 +320,7 @@ def receive_analysis_results():
         
         if not job:
             logger.warning(f"Received analysis results for unknown job {job_id}")
-            return jsonify({"error": "Job ID not found"}), 404
+            return jsonify({"error": "Job ID not found"}), 200
 
         try:
             # Decode and process data
@@ -353,18 +353,18 @@ def receive_analysis_results():
                 with conn.cursor() as cur:
                     cur.execute('UPDATE jobs SET status = %s WHERE job_id = %s', ('error', job_id))
                     conn.commit()
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": str(e)}), 200
             
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
 
 @app.route('/receive_anonymization_results', methods=['POST'])
 def receive_anonymization_results():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     
     pubsub_message = envelope['message']
     try:
@@ -409,14 +409,14 @@ def receive_anonymization_results():
         
     except Exception as e:
         logger.error(f"Failed to process anonymization results: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
 
 @app.route('/receive_error_notifications', methods=['POST'])
 def receive_error_notifications():
     envelope = request.get_json()
     if not envelope or 'message' not in envelope:
         logger.error("Invalid Pub/Sub message format")
-        return 'Bad Request', 400
+        return 'Bad Request', 200
     
     pubsub_message = envelope['message']
     try:
@@ -430,7 +430,7 @@ def receive_error_notifications():
 
         if not job_id or not stage or not error_message:
             logger.error("Missing job_id, stage or error message in Pub/Sub notification")
-            return jsonify({"error": "Missing job_id, stage or error message"}), 400
+            return jsonify({"error": "Missing job_id, stage or error message"}), 200
 
         # Update job status to error
         with get_db_connection() as conn:
@@ -446,11 +446,11 @@ def receive_error_notifications():
                     return jsonify({"message": "Error notification received successfully"}), 200
                 else:
                     logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
-                    return jsonify({"error": "Job ID not found"}), 404
+                    return jsonify({"error": "Job ID not found"}), 200
                     
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
-        return 'Bad Request', 400
+        return 'Bad Request', 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)
