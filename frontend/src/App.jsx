@@ -1,21 +1,44 @@
+// Utility per convertire array di oggetti in array di array secondo l'ordine delle colonne, con debug
+function objectsToRows(objects, columns) {
+  console.log('objectsToRows input:', { objects, columns });
+
+  if (!Array.isArray(objects) || objects.length === 0) {
+    console.log('objectsToRows: empty or invalid objects');
+    return [];
+  }
+  if (!Array.isArray(columns) || columns.length === 0) {
+    console.log('objectsToRows: empty or invalid columns');
+    return [];
+  }
+
+  const rows = objects.map(obj => {
+    if (typeof obj !== 'object' || obj === null) {
+      console.log('objectsToRows: invalid object', obj);
+      return [];
+    }
+
+    const row = columns.map(col => {
+      const value = obj[col];
+      if (value === undefined) {
+        console.warn(`🚨 Column "${col}" not found in object:`, obj);
+      }
+      return value !== undefined ? value : '';
+    });
+
+    console.log('objectsToRows: converted row', row);
+    return row;
+  });
+
+  console.log('objectsToRows output:', rows);
+  return rows;
+}
+
 import React, { useState, useEffect } from 'react';
 import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, AlertCircle, Clock, Database, FileText } from 'lucide-react';
 import { uploadFile, getFiles, anonymizeData, downloadFile,checkJobStatus  } from './api';
 
-
-// Firebase configuration 
-const firebaseConfig = {
-  apiKey: "AIzaSyA4coFZ1hQkJAdMcSVIpbWgZ3Fa99knxz4",
-  authDomain: "gruppo-3-456912.firebaseapp.com",
-  projectId: "gruppo-3-456912",
-  storageBucket: "gruppo-3-456912.firebasestorage.app",
-  messagingSenderId: "614401261394",
-  appId: "1:614401261394:web:459f56b903f80d4df9848b"
-};
-
-// Firebase will be loaded from CDN 
-let auth = null;
-let provider = null;
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import '../src/firebase'; // Assicura che Firebase sia inizializzato
 
 const anonymizationAlgorithms = [
   { 
@@ -36,7 +59,7 @@ const anonymizationAlgorithms = [
  
   { 
     id: 'differential-privacy', 
-    name: 'Differential Privacy', 
+    name: 'Differential-Privacy', 
     description: 'Adds calibrated noise to protect individual privacy',
     params: [{ name: 'epsilon', type: 'number', min: 0.1, max: 10, step: 0.1, default: 1.0, description: 'Privacy budget (lower = more private)' }]
   }
@@ -67,77 +90,37 @@ const AnonimaData = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingMessage, setProcessingMessage] = useState('');
 
-  // Load Firebase SDK and initialize
+  // Gestione autenticazione con Firebase Modular SDK
   useEffect(() => {
-    const loadFirebase = async () => {
-      try {
-        // Load Firebase scripts
-        const firebaseAppScript = document.createElement('script');
-        firebaseAppScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/firebase/9.22.0/firebase-app-compat.min.js';
-        firebaseAppScript.onload = () => {
-          const firebaseAuthScript = document.createElement('script');
-          firebaseAuthScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/firebase/9.22.0/firebase-auth-compat.min.js';
-          firebaseAuthScript.onload = () => {
-            // Initialize Firebase after scripts are loaded
-            if (window.firebase) {
-              const app = window.firebase.initializeApp(firebaseConfig);
-              auth = window.firebase.auth();
-              provider = new window.firebase.auth.GoogleAuthProvider();
-              
-              // Set up auth state listener
-              const unsubscribe = auth.onAuthStateChanged((user) => {
-                if (user) {
-                  setUser({
-                    uid: user.uid,
-                    name: user.displayName,
-                    email: user.email,
-                    avatar: user.photoURL
-                  });
-                  setCurrentView('dashboard');
-                  loadStats();
-                } else {
-                  setUser(null);
-                  setCurrentView('login');
-                }
-                setLoading(false);
-              });
-
-              setFirebaseLoaded(true);
-              
-              // Cleanup function
-              window.firebaseUnsubscribe = unsubscribe;
-            }
-          };
-          document.head.appendChild(firebaseAuthScript);
-        };
-        document.head.appendChild(firebaseAppScript);
-      } catch (error) {
-        console.error('Firebase loading error:', error);
-        setLoading(false);
-        setAuthError('Failed to load authentication system');
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUser({
+          uid: user.uid,
+          name: user.displayName,
+          email: user.email,
+          avatar: user.photoURL
+        });
+        setCurrentView('dashboard');
+        loadStats();
+      } else {
+        setUser(null);
+        setCurrentView('login');
       }
-    };
-
-    loadFirebase();
-
-    // Cleanup
-    return () => {
-      if (window.firebaseUnsubscribe) {
-        window.firebaseUnsubscribe();
-      }
-    };
+      setLoading(false);
+    });
+    setFirebaseLoaded(true);
+    return () => unsubscribe();
   }, []);
 
-  // Firebase Google Sign In
-  const handleLogin = async () => {
-    if (!auth || !provider) {
-      setAuthError('Authentication system not ready');
-      return;
-    }
 
+  // Firebase Google Sign In (modular)
+  const handleLogin = async () => {
+    const auth = getAuth();
+    const provider = new GoogleAuthProvider();
     try {
       setAuthError('');
-      const result = await auth.signInWithPopup(provider);
+      await signInWithPopup(auth, provider);
       // User will be set automatically by the auth state listener
     } catch (error) {
       console.error('Authentication error:', error);
@@ -145,12 +128,11 @@ const AnonimaData = () => {
     }
   };
 
-  // Firebase Sign Out
+  // Firebase Sign Out (modular)
   const handleLogout = async () => {
-    if (!auth) return;
-    
+    const auth = getAuth();
     try {
-      await auth.signOut();
+      await signOut(auth);
       // User will be cleared automatically by the auth state listener
     } catch (error) {
       console.error('Logout error:', error);
@@ -229,36 +211,65 @@ const startPolling = (jobId) => {
     try {
       const response = await checkJobStatus(jobId);
       console.log("Polling status:", response);
-      
-      if (response.status === 'analized') {
-        // Analisi completata
+      if (response.status === 'analyzed') {
         setProcessingStatus('completed');
         setProcessingMessage('Analysis completed successfully!');
         setUploadProgress(100);
         
-        setDataPreview({
-          columns: response.columns || [],
-          rows: response.sample || []
-        });
+        let columns = response.processed_data_info?.columns
+          || response.anonymized_data_info?.columns
+          || response.columns
+          || [];
+        let rows;
         
+        if (Array.isArray(response.processed_data_preview)) {
+          rows = objectsToRows(response.processed_data_preview, columns);
+        } else if (Array.isArray(response.sample)) {
+          rows = objectsToRows(response.sample, columns);
+        } else {
+          rows = [];
+        }
+        setDataPreview({ columns, rows });
         clearInterval(interval);
         setPollingInterval(null);
         setCurrentView('configure');
-        
-      } else if (response.status === 'anonymized' || response.status === 'completed') {
-        // Anonimizzazione completata
+       } else if (response.status === 'anonymized' || response.status === 'completed') {
         setProcessingStatus('completed');
         setProcessingMessage('Anonymization completed successfully!');
         setUploadProgress(100);
-        
-        setAnonymizedPreview({
-          columns: response.columns || dataPreview.columns,
-          rows: response.dati_anonimizzati || response.anonymized_data || []
-        });
-        
+        /*
+        // Estrai colonne e dati dalla risposta
+        let columns =
+          (response.columns) ||
+          (response.metadata && Array.isArray(response.metadata)
+            ? response.metadata.map(m => m.column_name)
+            : null) ||
+          (response.columns) ||
+          (response.anonymized_preview && response.anonymized_preview.length > 0
+            ? Object.keys(response.anonymized_preview[0])
+            : []);
+        let anonymizedData =
+          response.anonymized_preview ||
+          response.anonymized_data_preview ||
+          response.anonymized_data ||
+          response.rows ||
+          response.sample ||
+          [];
+        let rows = Array.isArray(anonymizedData)
+          ? objectsToRows(anonymizedData, columns)
+          : [];
+        */
+        console.log('Anonymization response:', response);
+        let columns = response.columns;
+        console.log('Columns:', columns);
+        let anonymizedData = response.anonymized_preview;
+        console.log('Anonymization data:', anonymizedData);
+        let rows = objectsToRows(anonymizedData, columns);
+        setAnonymizedPreview({ columns, rows });
+        window.__lastAnonymizedRaw = anonymizedData;
+        console.log('Set anonymizedPreview:', { columns, rows });
         clearInterval(interval);
         setPollingInterval(null);
-        
       } else if (response.status === 'error') {
         // Errore
         setProcessingStatus('error');
@@ -333,14 +344,14 @@ const handleAnonymize = async () => {
 
 
 // 4. Aggiorna handleDownload per usare il nuovo formato
-const handleDownload = async (jobId, type = 'full') => {
+const handleDownload = async (jobId) => {
   try {
-    const fileBlob = await downloadFile(jobId, type);
+    const fileBlob = await downloadFile(jobId);
 
     const url = window.URL.createObjectURL(fileBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `anonymized_data_${jobId}_${type}.csv`;
+    a.download = `anonymized_data_${jobId}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -603,7 +614,7 @@ const loadStats = async () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button className="text-blue-600 hover:text-blue-900 mr-4"
-                             onClick={() => handleDownload(dataset.id)}
+                             onClick={() => handleDownload(dataset.job_id)}
                             >
                               <Download className="w-4 h-4" />
                             </button>
@@ -772,7 +783,7 @@ const loadStats = async () => {
                             max={param.max}
                             step={param.step || 1}
                             defaultValue={param.default}
-                            onChange={(e) => handleParamChange(param.name, parseFloat(e.target.value))}
+                            onChange={(e) => handleParamChange(param.name, parseInt(e.target.value))}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         ) : param.type === 'select' ? (
@@ -815,13 +826,23 @@ const loadStats = async () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {dataPreview.rows.slice(0, 5).map((row, idx) => (
-                        <tr key={idx} className="border-b">
-                          {row.map((cell, cellIdx) => (
-                            <td key={cellIdx} className="p-2 text-gray-600">{cell}</td>
-                          ))}
+                      {Array.isArray(dataPreview.rows) && dataPreview.rows.length > 0 ? (
+                        dataPreview.rows.slice(0, 5).map((row, idx) => (
+                          <tr key={idx} className="border-b">
+                            {Array.isArray(row)
+                              ? row.map((cell, cellIdx) => (
+                                  <td key={cellIdx} className="p-2 text-gray-600">{cell}</td>
+                                ))
+                              : null}
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={dataPreview.columns.length} className="p-2 text-gray-400 text-center">
+                            No data available
+                          </td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -972,13 +993,23 @@ const loadStats = async () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {dataPreview.rows.slice(0, 3).map((row, idx) => (
-                            <tr key={idx} className="border-b">
-                              {row.map((cell, cellIdx) => (
-                                <td key={cellIdx} className="p-2 text-gray-600">{cell}</td>
-                              ))}
+                          {Array.isArray(dataPreview?.rows) && dataPreview.rows.length > 0 ? (
+                            dataPreview.rows.slice(0, 3).map((row, idx) => (
+                              <tr key={idx} className="border-b">
+                                {Array.isArray(row)
+                                  ? row.map((cell, cellIdx) => (
+                                      <td key={cellIdx} className="p-2 text-gray-600">{cell}</td>
+                                    ))
+                                  : null}
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={dataPreview?.columns?.length || 1} className="p-2 text-gray-400 text-center">
+                                No data available
+                              </td>
                             </tr>
-                          ))}
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -987,6 +1018,24 @@ const loadStats = async () => {
                   {/* Anonymized Data */}
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data</h3>
+                    {/* Debug info visibile per aiutare a capire il problema */}
+                    <div className="mb-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-xs">
+                      <strong>Debug:</strong> Found {Array.isArray(anonymizedPreview.rows) ? anonymizedPreview.rows.length : 0} rows in anonymizedPreview.<br />
+                      {/* Mostra anche un estratto dei dati grezzi se disponibili */}
+                      {window.__lastAnonymizedRaw && (
+                        <>
+                          <span>First 2 raw objects: </span>
+                          <pre style={{maxWidth:'100%',overflowX:'auto',display:'inline-block'}}>{JSON.stringify(window.__lastAnonymizedRaw.slice(0,2), null, 2)}</pre>
+                        </>
+                      )}
+                    </div>
+                    {/* Messaggio di errore se la preview è vuota */}
+                    {(!Array.isArray(anonymizedPreview.rows) || anonymizedPreview.rows.length === 0) && (
+                      <div className="mb-4 p-4 bg-red-100 border border-red-200 rounded text-red-700 flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-red-500" />
+                        <span>No anonymized data found in the backend response. Please check the backend or contact support.</span>
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
@@ -997,13 +1046,50 @@ const loadStats = async () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {anonymizedPreview.rows.map((row, idx) => (
-                            <tr key={idx} className="border-b">
-                              {row.map((cell, cellIdx) => (
-                                <td key={cellIdx} className="p-2 text-blue-600 font-medium">{cell}</td>
-                              ))}
+                          {Array.isArray(anonymizedPreview.rows) && anonymizedPreview.rows.length > 0 ? (
+                            anonymizedPreview.rows.slice(0, 3).map((row, idx) => {
+                              // Se row è undefined/null, mostra una riga vuota
+                              if (!row) {
+                                return (
+                                  <tr key={idx} className="border-b">
+                                    <td colSpan={anonymizedPreview.columns.length} className="p-2 text-gray-400 text-center">Empty row</td>
+                                  </tr>
+                                );
+                              }
+                              // Se row è un array, mostra i valori
+                              if (Array.isArray(row)) {
+                                return (
+                                  <tr key={idx} className="border-b">
+                                    {row.map((cell, cellIdx) => (
+                                      <td key={cellIdx} className="p-2 text-blue-600 font-medium">{cell}</td>
+                                    ))}
+                                  </tr>
+                                );
+                              }
+                              // Se row è un oggetto, mostra i valori nell'ordine delle colonne
+                              if (typeof row === 'object' && row !== null) {
+                                return (
+                                  <tr key={idx} className="border-b">
+                                    {anonymizedPreview.columns.map((col, cellIdx) => (
+                                      <td key={cellIdx} className="p-2 text-blue-600 font-medium">{row[col] !== undefined ? row[col] : ''}</td>
+                                    ))}
+                                  </tr>
+                                );
+                              }
+                              // Altrimenti, mostra il valore come stringa
+                              return (
+                                <tr key={idx} className="border-b">
+                                  <td colSpan={anonymizedPreview.columns.length} className="p-2 text-blue-600 font-medium">{String(row)}</td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan={anonymizedPreview?.columns?.length || 1} className="p-2 text-gray-400 text-center">
+                                No data available
+                              </td>
                             </tr>
-                          ))}
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -1011,13 +1097,6 @@ const loadStats = async () => {
                 </div>
 
                 <div className="flex gap-4 justify-center">
-                  {/* Missing in our workflow, not implemented */}
-                  {/* <button 
-                    onClick={() => setCurrentView('configure')}
-                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    Reconfigure
-                  </button> */}
                   <button 
                     onClick={handleSave}
                     className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2"

@@ -1,24 +1,27 @@
-//import { getAuth } from 'firebase/auth';
 
-//const API_BASE_URL = 'http://localhost:5000';
+import '../src/firebase';
+import { getAuth } from 'firebase/auth';
+
+
 
 
 export const API_BASE_URL =
   window.RUNTIME_ENV && window.RUNTIME_ENV.API_BASE_URL
-    ? window.RUNTIME_ENV.API_BASE_URL
-    : "http://localhost:3001"; // fallback opzionale
+    ? window.RUNTIME_ENV.API_BASE_URL.replace(/\/$/, '')
+    : "https://orchestratore-614401261394.europe-west1.run.app"; // fallback opzionale, senza slash finale
 
 const getAuthHeader = async () => {
-  /*const auth = getAuth();
+  const auth = getAuth();
+  console.log(auth)
   const user = auth.currentUser;
   if (!user) throw new Error('Utente non autenticato');
 
   const token = await user.getIdToken();
   return {
     Authorization: `Bearer ${token}`,
-  };*/
-  return {} //vuoto solo per i test
-};
+  };
+  
+}
 
 
 
@@ -26,7 +29,7 @@ const getAuthHeader = async () => {
 export const checkJobStatus = async (jobId) => {
   try {
     // Prima prova a controllare lo status dell'analisi
-    const analysisResponse = await fetch(`${API_BASE_URL}/get_analysis_status/${jobId}`, {
+    const analysisResponse = await fetch(`${API_BASE_URL}/get_status/${jobId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -39,16 +42,44 @@ export const checkJobStatus = async (jobId) => {
       
       // Se l'analisi è completata, restituisci i dati dell'analisi
       if (analysisData.status === 'analyzed') {
+        // Estrai le colonne sia da metadata (array di oggetti) che da metadata.columns (array di stringhe)
+        let columns = [];
+        if (Array.isArray(analysisData.metadata)) {
+          columns = analysisData.metadata.map(col => col.column_name);
+        } else if (Array.isArray(analysisData.metadata?.columns)) {
+          columns = analysisData.metadata.columns;
+        } else if (Array.isArray(analysisData.columns)) {
+          columns = analysisData.columns;
+        }
         return {
-          status: 'analized', // Mantieni il nome che il frontend si aspetta
+          status: 'analyzed',
           job_id: jobId,
-          columns: analysisData.processed_data_info?.columns || [],
+          columns,
           sample: analysisData.processed_data_preview || [],
-          colonna: analysisData.processed_data_info?.columns || [], // Fallback per compatibilità
-          rows: analysisData.processed_data_preview || []
+          rows: analysisData.processed_data_preview || [],
+          metadata: analysisData.metadata
         };
       }
-      
+      else if (analysisData.status === 'anonymized') {
+        /*return {
+          status: 'anonymized',
+          job_id: jobId,
+          columns: analysisData.anonymized_data_info?.columns || analysisData.data_info?.columns || [],
+          anonymized_data: analysisData.anonymized_data_preview,
+          rows: analysisData.anonymized_data_preview,
+          preview: data
+        }*/
+        let column = [];
+        column = analysisData.metadata.map(col => col.column_name);
+        
+        return {
+          status: 'anonymized',
+          job_id: jobId,
+          columns:column,
+          anonymized_preview: analysisData.anonymized_preview,
+          metadata: analysisData.metadata
+        };
+      }
       // Se l'analisi è ancora in corso
       return {
         status: analysisData.status,
@@ -58,37 +89,9 @@ export const checkJobStatus = async (jobId) => {
       };
     }
 
-    // Se l'analisi non è trovata, prova a controllare l'anonimizzazione
-    const anonymizationResponse = await fetch(`${API_BASE_URL}/get_anonymization_status/${jobId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(await getAuthHeader()),
-      }
-    });
-
-    if (anonymizationResponse.ok) {
-      const anonymizationData = await anonymizationResponse.json();
-      
-      if (anonymizationData.status === 'completed') {
-        return {
-          status: 'anonymized', // Nuovo status per indicare che l'anonimizzazione è completata
-          job_id: jobId,
-          columns: anonymizationData.data_info?.columns || [],
-          dati_anonimizzati: anonymizationData.data || [],
-          anonymized_data: anonymizationData.data || [],
-          method_used: anonymizationData.method_used,
-          params_used: anonymizationData.params_used
-        };
-      }
-      
-      return {
-        status: anonymizationData.status,
-        job_id: jobId
-      };
-    }
-
-    throw new Error('Job not found');
+    
+    
+    
   } catch (error) {
     console.error('Status check error:', error);
     throw new Error(`Status check failed: ${error.message}`);
@@ -99,7 +102,7 @@ export const checkJobStatus = async (jobId) => {
 // Funzione per l'upload del file (modificata)
 export const uploadFile = async (formData) => {
   const headers = await getAuthHeader();
-  const response = await fetch(`${API_BASE_URL}/upload`, {
+  const response = await fetch(`${API_BASE_URL}/upload_and_analyze`, {
     method: 'POST',
     body: formData,
     headers,
@@ -121,30 +124,24 @@ export const anonymizeData = async (params) => {
     'Content-Type': 'application/json',
   };
 
-  // Trasforma i parametri nel formato che l'API si aspetta
+  // Trasforma userSelection nel formato che l'API si aspetta
+  let user_selections = [];
+  if (params.userSelection) {
+    Object.entries(params.userSelection).forEach(([column, config]) => {
+      user_selections.push({
+        column_name: column,
+        is_quasi_identifier: !!config.quasi,
+        should_anonymize: !!config.sensitive // esempio: true se sensitive o quasi
+      });
+    });
+  }
+
   const payload = {
     job_id: params.job_id,
     method: params.algorithm, // 'algorithm' diventa 'method'
     params: params.params,
-    user_selections: {
-      quasi_identifiers: [],
-      sensitive_attributes: [],
-      identifiers_to_remove: []
-    }
+    user_selections: user_selections
   };
-
-  // Trasforma userSelection nel formato corretto
-  if (params.userSelection) {
-    Object.entries(params.userSelection).forEach(([column, config]) => {
-      if (config.quasi) {
-        payload.user_selections.quasi_identifiers.push(column);
-      }
-      if (config.sensitive) {
-        payload.user_selections.sensitive_attributes.push(column);
-      }
-      // Potresti aggiungere logica per identifiers_to_remove se necessario
-    });
-  }
 
   const response = await fetch(`${API_BASE_URL}/request_anonymization`, {
     method: 'POST',
@@ -169,9 +166,9 @@ export const anonymizeData = async (params) => {
 
 
 // 4. Download del file - ora supporta sia full che sample
-export const downloadFile = async (jobId, type = 'full') => {
+export const downloadFile = async (jobId) => {
   const headers = await getAuthHeader();
-  const response = await fetch(`${API_BASE_URL}/download/${jobId}/${type}`, {
+  const response = await fetch(`${API_BASE_URL}/download/${jobId}`, {
     method: 'GET',
     headers,
   });
@@ -198,10 +195,18 @@ export const getFiles = async () => {
 
   const data = await response.json();
   
-  // La risposta è un array con due elementi: [statistics, files]
+  // Supporta sia risposta come [statistics, files] sia come oggetto { stats: [...], files: [...] }
   if (Array.isArray(data) && data.length >= 2) {
     const [statistics, files] = data;
-    
+    return {
+      totalDatasets: statistics[0]?.datasets || 0,
+      completedJobs: files.filter(f => f.status === 'completed').length,
+      dataProtected: statistics[0]?.total_rows || 0,
+      files: files || []
+    };
+  } else if (typeof data === 'object' && data.stats && data.files) {
+    const statistics = data.stats;
+    const files = data.files;
     return {
       totalDatasets: statistics[0]?.datasets || 0,
       completedJobs: files.filter(f => f.status === 'completed').length,
