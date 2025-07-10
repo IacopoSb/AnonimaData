@@ -329,6 +329,10 @@ resource "google_cloud_run_v2_service" "anonymizer" {
         name  = "ERROR_INFORMATIONS_TOPIC"
         value = google_pubsub_topic.error_informations.name
       }
+      scaling {
+        min_instance_count = 1
+        max_instance_count = 20
+      }
       resources {
         limits = {
           memory = "1Gi"
@@ -375,6 +379,10 @@ resource "google_cloud_run_v2_service" "formatter" {
       env {
         name  = "ERROR_INFORMATIONS_TOPIC"
         value = google_pubsub_topic.error_informations.name
+      }
+      scaling {
+        min_instance_count = 1
+        max_instance_count = 20
       }
       resources {
         limits = {
@@ -566,6 +574,7 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
     mosaicLayout = {
       columns = 12
       tiles = [
+        # Richieste Cloud Run
         {
           width  = 6
           height = 4
@@ -593,13 +602,14 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
             }
           }
         },
+        # Latenza Cloud Run
         {
           width  = 6
           height = 4
           xPos   = 6
           yPos   = 0
           widget = {
-            title = "Cloud Run Services - Latency"
+            title = "Cloud Run Services - Latency (95th percentile)"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
@@ -620,18 +630,47 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
             }
           }
         },
+        # Istanze attive Cloud Run
         {
           width  = 6
           height = 4
           xPos   = 0
           yPos   = 4
           widget = {
-            title = "Cloud Run Jobs - Executions"
+            title = "Cloud Run - Active Instances"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
                   timeSeriesFilter = {
-                    filter = "resource.type=\"cloud_run_job\" AND metric.type=\"run.googleapis.com/job/completed_execution_count\""
+                    filter = "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/container/instance_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_MEAN"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Instances"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi inviati (tutti i topic)
+        {
+          width  = 6
+          height = 4
+          xPos   = 6
+          yPos   = 4
+          widget = {
+            title = "Pub/Sub Messages Sent (All Topics)"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
                     aggregation = {
                       perSeriesAligner = "ALIGN_RATE"
                       alignmentPeriod = "60s"
@@ -641,24 +680,81 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
                 plotType = "LINE"
               }]
               yAxis = {
-                label = "Executions/sec"
+                label = "Messages/sec"
                 scale = "LINEAR"
               }
             }
           }
         },
+        # Pub/Sub messaggi ricevuti (tutte le subscription)
         {
           width  = 6
           height = 4
-          xPos   = 6
-          yPos   = 4
+          xPos   = 0
+          yPos   = 8
           widget = {
-            title = "Pub/Sub Messages"
+            title = "Pub/Sub Messages Pulled (All Subscriptions)"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
                   timeSeriesFilter = {
-                    filter = "resource.type=\"pubsub_topic\" AND metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
+                    filter = "metric.type=\"pubsub.googleapis.com/subscription/pull_message_operation_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_RATE"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Pulled/sec"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi per singolo topic (formatter input)
+        {
+          width  = 6
+          height = 4
+          xPos   = 6
+          yPos   = 8
+          widget = {
+            title = "Formatter Input Topic - Messages Sent"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "resource.label.\"topic_id\"=\"${google_pubsub_topic.formatter_input.name}\" AND metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_RATE"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Messages/sec"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi per singolo topic (anonymizer input)
+        {
+          width  = 6
+          height = 4
+          xPos   = 0
+          yPos   = 12
+          widget = {
+            title = "Anonymizer Input Topic - Messages Sent"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "resource.label.\"topic_id\"=\"${google_pubsub_topic.anonymizer_input.name}\" AND metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
                     aggregation = {
                       perSeriesAligner = "ALIGN_RATE"
                       alignmentPeriod = "60s"
