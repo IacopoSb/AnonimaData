@@ -14,7 +14,7 @@ export let options = {
     duration: '1h',        // 1 hour
 };
 
-const BASE_URL = 'https://';
+const BASE_URL = 'https://orchestratore-sktg2ckwoq-ew.a.run.app';
 
 // Polling function for status
 function pollStatus(job_id, desired_status) {
@@ -22,7 +22,7 @@ function pollStatus(job_id, desired_status) {
     let maxPolls = 60; // safety timeout (1min with sleep 1s)
     let count = 0;
     while (count < maxPolls) {
-        let res = http.get(`${BASE_URL}/get_status/${job_id}`);
+        let res = http.get(`${BASE_URL}/noauth_get_status/${job_id}`);
         if (res.status !== 200) break;
         let body = res.json();
         status = body.status;
@@ -36,7 +36,7 @@ function pollStatus(job_id, desired_status) {
 export default function () {
     // 1) File upload
     let fileData = open('./testFile.csv', 'b'); // Load a local sample file
-    let uploadRes = http.post(`${BASE_URL}/upload_and_analyze`, fileData, {
+    let uploadRes = http.post(`${BASE_URL}/noauth_upload_and_analyze`, fileData, {
         headers: { 'Content-Type': 'application/octet-stream' },
     });
     check(uploadRes, { 'upload ok': (r) => r.status === 200 });
@@ -52,7 +52,7 @@ export default function () {
     // 5) POST to /request_anonymization with one of the 3 random payloads
     let anonPayload = anonymizationPayloads[Math.floor(Math.random() * anonymizationPayloads.length)];
     anonPayload["job_id"] = job_id;
-    let anonRes = http.post(`${BASE_URL}/request_anonymization`, JSON.stringify(anonPayload), {
+    let anonRes = http.post(`${BASE_URL}/noauth_request_anonymization`, JSON.stringify(anonPayload), {
         headers: { 'Content-Type': 'application/json' },
     });
     check(anonRes, { 'anonymization request ok': (r) => r.status === 200 });
@@ -62,7 +62,7 @@ export default function () {
     check(anonymized, { 'status is anonymized': (s) => s === 'anonymized' });
 
     // 8) Download result
-    let downloadRes = http.get(`${BASE_URL}/download/${job_id}`);
+    let downloadRes = http.get(`${BASE_URL}/noauth_download/${job_id}`);
     check(downloadRes, { 'download ok': (r) => r.status === 200 });
 
     sleep(Math.random() * 2 + 1);

@@ -329,10 +329,6 @@ resource "google_cloud_run_v2_service" "anonymizer" {
         name  = "ERROR_INFORMATIONS_TOPIC"
         value = google_pubsub_topic.error_informations.name
       }
-      scaling {
-        min_instance_count = 1
-        max_instance_count = 20
-      }
       resources {
         limits = {
           memory = "1Gi"
@@ -379,10 +375,6 @@ resource "google_cloud_run_v2_service" "formatter" {
       env {
         name  = "ERROR_INFORMATIONS_TOPIC"
         value = google_pubsub_topic.error_informations.name
-      }
-      scaling {
-        min_instance_count = 1
-        max_instance_count = 20
       }
       resources {
         limits = {

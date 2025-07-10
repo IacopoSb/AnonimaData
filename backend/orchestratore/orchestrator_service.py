@@ -120,7 +120,7 @@ def upload_and_analyze():
             with conn.cursor() as cur:
                 cur.execute('''
                     INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ''', (job_id, request.user_id, original_filename, 0, None, None, None, None, None, upload_at, None, 'uploaded'))
                 conn.commit()
 
@@ -232,12 +232,12 @@ def get_files():
         with conn.cursor() as cur:
             cur.execute('SELECT * FROM jobs WHERE user_id = %s', (request.user_id,))
             jobs = cur.fetchall()
-    
     files_info = []
     for job in jobs:
         if job['status'] == 'anonymized':
             files_info.append({
                 'job_id': job['job_id'],
+                'anonymized_preview': json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None,
                 'filename': job['filename'],
                 'status': job['status'],
                 'method': job['method'],
@@ -451,6 +451,29 @@ def receive_error_notifications():
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
         return 'Bad Request', 200
+
+# ==== API FOR TESTING PURPOSES ====
+MOCK_USER_ID = "mocked-user"
+
+@app.route('/noauth_upload_and_analyze', methods=['POST'])
+def noauth_upload_and_analyze():
+    request.user_id = MOCK_USER_ID
+    return upload_and_analyze()
+
+@app.route('/noauth_request_anonymization', methods=['POST'])
+def noauth_request_anonymization():
+    request.user_id = MOCK_USER_ID
+    return request_anonymization()
+
+@app.route('/noauth_get_status/<job_id>', methods=['GET'])
+def noauth_get_status(job_id):
+    request.user_id = MOCK_USER_ID
+    return get_status(job_id)
+
+@app.route('/noauth_download/<job_id>', methods=['GET'])
+def noauth_download(job_id):
+    request.user_id = MOCK_USER_ID
+    return download_full_file(job_id)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)
