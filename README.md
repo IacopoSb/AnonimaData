@@ -1,7 +1,7 @@
 # AnonimaData
 
 ![AnonimaData logo](assets/logo.png)
-Exam project by [Pietro Coloretti](https://github.com/PietroColoretti01), [Leonardo Gennaioli](https://github.com/leonardo-gennaioli) and [Iacopo Sbalchiero](https://github.com/IacopoSb) for the course Scalable and Relayable Services in the Computer Engineering Second Cycle Degree @ Unibo, Academic Year 2024-2025.
+Exam project by [Pietro Coloretti](https://github.com/PietroColoretti01), [Leonardo Gennaioli](https://github.com/leonardo-gennaioli) and [Iacopo Sbalchiero](https://github.com/IacopoSb) for the course Scalable and Reliable Services in the Computer Engineering Second Cycle Degree @ Unibo, Academic Year 2024-2025.
 
 ## Abstract
 
@@ -55,8 +55,8 @@ Stress tests and performance scripts are available in `📂 stressTests`.
 
 ## Authors
 
-| Name                                                  | GitHub Profile                              |
-| ----------------------------------------------------- | ------------------------------------------- |
-| <div align="center"><img src="https://github.com/PietroColoretti01.png" width="50" style="border-radius: 50%;"><br>Pietro Coloretti</div> | [GitHub](https://github.com/PietroColoretti01) |
-| <div align="center"><img src="https://github.com/leonardo-gennaioli.png" width="50" style="border-radius: 50%;"><br>Leonardo Gennaioli</div> | [GitHub](https://github.com/leonardo-gennaioli) |
-| <div align="center"><img src="https://github.com/IacopoSb.png" width="50" style="border-radius: 50%;"><br>Iacopo Sbalchiero</div> | [GitHub](https://github.com/IacopoSb)       |
+| Name                                                                                                                                                     | GitHub Profile                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `<div align="center"><img src="https://github.com/PietroColoretti01.png" width="50" style="border-radius: 50%;">``<br>`Pietro Coloretti`</div>`    | [GitHub](https://github.com/PietroColoretti01)  |
+| `<div align="center"><img src="https://github.com/leonardo-gennaioli.png" width="50" style="border-radius: 50%;">``<br>`Leonardo Gennaioli`</div>` | [GitHub](https://github.com/leonardo-gennaioli) |
+| `<div align="center"><img src="https://github.com/IacopoSb.png" width="50" style="border-radius: 50%;">``<br>`Iacopo Sbalchiero`</div>`            | [GitHub](https://github.com/IacopoSb)           |
