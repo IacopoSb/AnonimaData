@@ -454,7 +454,7 @@ resource "google_cloud_run_v2_service" "orchestratore" {
       }
       env {
         name  = "DB_HOST"
-        value = google_sql_database_instance.main_db.private_ip_address
+        value = "localhost:5432"
       }
       env {
         name  = "DB_NAME"
@@ -495,7 +495,15 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         }
       }
     }
-    timeout = "300s"
+  }
+  containers {
+      # Sidecar Auth Proxy
+      image = "gcr.io/cloudsql-docker/gce-proxy:1.36.0"
+      args = [
+        "/cloud_sql_proxy",
+        "-instances=${google_sql_database_instance.main_db.connection_name}=tcp:5432"
+      ]
+      timeout = "300s"
     max_instance_request_concurrency = 1000
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
   }
