@@ -57,6 +57,6 @@ Stress tests and performance scripts are available in `📂 stressTests`.
 
 | Name                                                                                                                                                     | GitHub Profile                               |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `<div align="center"><img src="https://github.com/PietroColoretti01.png" width="50" style="border-radius: 50%;">``<br>`Pietro Coloretti`</div>`    | [GitHub](https://github.com/PietroColoretti01)  |
-| `<div align="center"><img src="https://github.com/leonardo-gennaioli.png" width="50" style="border-radius: 50%;">``<br>`Leonardo Gennaioli`</div>` | [GitHub](https://github.com/leonardo-gennaioli) |
-| `<div align="center"><img src="https://github.com/IacopoSb.png" width="50" style="border-radius: 50%;">``<br>`Iacopo Sbalchiero`</div>`            | [GitHub](https://github.com/IacopoSb)           |
+| <div align="center"><img src="https://github.com/PietroColoretti01.png" width="50" style="border-radius: 50%;"><br>Pietro Coloretti</div>    | [GitHub](https://github.com/PietroColoretti01)  |
+| <div align="center"><img src="https://github.com/leonardo-gennaioli.png" width="50" style="border-radius: 50%;"><br>Leonardo Gennaioli</div> | [GitHub](https://github.com/leonardo-gennaioli) |
+| <div align="center"><img src="https://github.com/IacopoSb.png" width="50" style="border-radius: 50%;"><br>Iacopo Sbalchiero</div>            | [GitHub](https://github.com/IacopoSb)           |
