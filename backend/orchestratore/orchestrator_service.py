@@ -11,9 +11,8 @@ from typing import Any, Dict
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import auth
-import psycopg2
-import psycopg2.extras
 from google.cloud import storage
+from sqlalchemy import create_engine, text
 
 # Configurations (environment variables)
 DB_HOST = os.environ.get("DB_HOST")
@@ -26,40 +25,37 @@ FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_db_connection():
-    return psycopg2.connect(
-        host=DB_HOST,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        cursor_factory=psycopg2.extras.RealDictCursor
-    )
+# SQLAlchemy engine with connection pool
+DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=20,           # Max number of connections in pool
+    max_overflow=30,        # Overflow connections
+    pool_timeout=30,        # Timeout for getting a connection
+    pool_recycle=1800       # Recycle connections every 30 min
+)
 
 def init_db():
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS jobs (
-                    job_id TEXT PRIMARY KEY,
-                    user_id TEXT,
-                    filename TEXT,
-                    rows INTEGER,
-                    metadata TEXT,
-                    path_file_analyzed TEXT,
-                    method TEXT,
-                    anonymized_preview TEXT,
-                    path_file_anonymized TEXT,
-                    upload_at TEXT,
-                    completed_at TEXT,
-                    status TEXT
-                )
-            ''')
-            conn.commit()
+    with engine.connect() as conn:
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                user_id TEXT,
+                filename TEXT,
+                rows INTEGER,
+                metadata TEXT,
+                path_file_analyzed TEXT,
+                method TEXT,
+                anonymized_preview TEXT,
+                path_file_anonymized TEXT,
+                upload_at TEXT,
+                completed_at TEXT,
+                status TEXT
+            )
+        '''))
+        conn.commit()
 
 init_db()
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
@@ -116,13 +112,25 @@ def upload_and_analyze():
 
         upload_at = datetime.now().isoformat()
         
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ''', (job_id, request.user_id, original_filename, 0, None, None, None, None, None, upload_at, None, 'uploaded'))
-                conn.commit()
+        with engine.connect() as conn:
+            conn.execute(text('''
+                INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
+                VALUES (:job_id, :user_id, :filename, :rows, :metadata, :path_file_analyzed, :method, :anonymized_preview, :path_file_anonymized, :upload_at, :completed_at, :status)
+            '''), {
+                "job_id": job_id,
+                "user_id": request.user_id,
+                "filename": original_filename,
+                "rows": 0,
+                "metadata": None,
+                "path_file_analyzed": None,
+                "method": None,
+                "anonymized_preview": None,
+                "path_file_anonymized": None,
+                "upload_at": upload_at,
+                "completed_at": None,
+                "status": 'uploaded'
+            })
+            conn.commit()
 
         if pubsub_manager:
             pubsub_manager.publish(Topics.DATA_UPLOAD_REQUESTS, {
@@ -149,10 +157,9 @@ def request_anonymization():
     if not all([job_id, method, user_selections is not None]):
         return jsonify({"error": "Missing job_id, method, or user_selections"}), 400
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-            job = cur.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
     
     if not job:
         return jsonify({"error": "Job not found"}), 404
@@ -172,7 +179,6 @@ def request_anonymization():
         processed_csv_content = blob.download_as_text()
         encoded_processed_csv = base64.b64encode(processed_csv_content.encode('utf-8')).decode('utf-8')
 
-        # Fix: metadata is already a JSON string, not a DataFrame
         metadata_json_content = job['metadata']
         encoded_metadata_json = base64.b64encode(metadata_json_content.encode('utf-8')).decode('utf-8')
 
@@ -186,12 +192,10 @@ def request_anonymization():
                 'metadata_content_base64': encoded_metadata_json
             }, attributes={'job_id': job_id})
 
-        # Update job status
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('UPDATE jobs SET status = %s, method = %s WHERE job_id = %s', 
-                           ('anonymization_requested', method, job_id))
-                conn.commit()
+        with engine.connect() as conn:
+            conn.execute(text('UPDATE jobs SET status = :status, method = :method WHERE job_id = :job_id'), 
+                       {"status": 'anonymization_requested', "method": method, "job_id": job_id})
+            conn.commit()
 
         return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
     
@@ -202,10 +206,9 @@ def request_anonymization():
 @app.route('/get_status/<job_id>', methods=['GET'])
 @firebase_auth_required
 def get_status(job_id):
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-            job = cur.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
     
     if not job:
         return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
@@ -228,10 +231,9 @@ def get_status(job_id):
 @app.route('/get_files', methods=['GET'])
 @firebase_auth_required
 def get_files():
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT * FROM jobs WHERE user_id = %s', (request.user_id,))
-            jobs = cur.fetchall()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE user_id = :user_id'), {"user_id": request.user_id})
+        jobs = list(result.mappings())
     files_info = []
     for job in jobs:
         if job['status'] == 'anonymized':
@@ -242,7 +244,9 @@ def get_files():
                 'status': job['status'],
                 'method': job['method'],
                 'rows': job['rows'],
-                'download_url': f"/download/{job['job_id']}"
+                'download_url': f"/download/{job['job_id']}",
+                'datetime_completition':job['completed_at'],
+                'datetime_upload': job['upload_at']
             })
         else:
             files_info.append({
@@ -260,10 +264,9 @@ def get_files():
 @app.route('/download/<job_id>', methods=['GET'])
 @firebase_auth_required
 def download_full_file(job_id):
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-            job = cur.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
     
     if not job:
         return jsonify({"error": "Job not found"}), 404
@@ -273,7 +276,6 @@ def download_full_file(job_id):
         return jsonify({"error": "File not ready. Still processing."}), 400
     
     try:
-        # Download the file from GCP bucket
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(job['path_file_anonymized'])
         if not blob.exists():
@@ -310,49 +312,46 @@ def receive_analysis_results():
         job_id = data.get('job_id')
         processed_data_content_base64 = data.get('processed_data_content_base64')
         metadata_content_base64 = data.get('metadata_content_base64')
-        dataset_info = data.get('dataset_info')
 
-        # Check if the job exists
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-                job = cur.fetchone()
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+            job = result.mappings().first()
         
         if not job:
             logger.warning(f"Received analysis results for unknown job {job_id}")
             return jsonify({"error": "Job ID not found"}), 200
 
         try:
-            # Decode and process data
             processed_csv = base64.b64decode(processed_data_content_base64).decode('utf-8')
             processed_df = pd.read_csv(StringIO(processed_csv))
-            
             metadata_json = base64.b64decode(metadata_content_base64).decode('utf-8')
 
-            # Save processed data to GCP bucket
             gcp_path = f"processed_data/{job_id}/processed_data.csv"
             bucket = storage_client.bucket(BUCKET_NAME)
             blob = bucket.blob(gcp_path)
             blob.upload_from_string(processed_df.to_csv(index=False), content_type='text/csv')
             
-            # Update job in database
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute('''
-                        UPDATE jobs
-                        SET status = %s, path_file_analyzed = %s, metadata = %s, rows = %s
-                        WHERE job_id = %s
-                    ''', ('analyzed', gcp_path, metadata_json, len(processed_df), job_id))
-                    conn.commit()
+            with engine.connect() as conn:
+                conn.execute(text('''
+                    UPDATE jobs
+                    SET status = :status, path_file_analyzed = :path_file_analyzed, metadata = :metadata, rows = :rows
+                    WHERE job_id = :job_id
+                '''), {
+                    "status": 'analyzed',
+                    "path_file_analyzed": gcp_path,
+                    "metadata": metadata_json,
+                    "rows": len(processed_df),
+                    "job_id": job_id
+                })
+                conn.commit()
             
             return jsonify({"message": "Analysis results received successfully"}), 200
             
         except Exception as e:
             logger.error(f"Error processing analysis results for job {job_id}: {e}")
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute('UPDATE jobs SET status = %s WHERE job_id = %s', ('error', job_id))
-                    conn.commit()
+            with engine.connect() as conn:
+                conn.execute(text('UPDATE jobs SET status = :status WHERE job_id = :job_id'), {"status": "error", "job_id": job_id})
+                conn.commit()
             return jsonify({"error": str(e)}), 200
             
     except Exception as e:
@@ -378,31 +377,32 @@ def receive_anonymization_results():
         anonymized_sample_content_base64 = data.get('anonymized_sample_content_base64')
         completed_at = datetime.now().isoformat()
 
-        # Decode data
         anonymized_csv = base64.b64decode(anonymized_file_content_base64).decode('utf-8')
         anonymized_df = pd.read_csv(StringIO(anonymized_csv))
 
         anonymized_sample_csv = base64.b64decode(anonymized_sample_content_base64).decode('utf-8')
         anonymized_sample_df = pd.read_csv(StringIO(anonymized_sample_csv))
 
-        # Save anonymized file to GCP bucket
         gcp_path = f"anonymized_data/{job_id}/anonymized_data.csv"
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(gcp_path)
         blob.upload_from_string(anonymized_df.to_csv(index=False), content_type='text/csv')
 
-        # Save anonymized sample to database
         anonymized_preview_json = anonymized_sample_df.to_json(orient='records', indent=4)
 
-        # Update database
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    UPDATE jobs
-                    SET status = %s, anonymized_preview = %s, path_file_anonymized = %s, completed_at = %s
-                    WHERE job_id = %s
-                ''', ('anonymized', anonymized_preview_json, gcp_path, completed_at, job_id))
-                conn.commit()
+        with engine.connect() as conn:
+            conn.execute(text('''
+                UPDATE jobs
+                SET status = :status, anonymized_preview = :anonymized_preview, path_file_anonymized = :path_file_anonymized, completed_at = :completed_at
+                WHERE job_id = :job_id
+            '''), {
+                "status": "anonymized",
+                "anonymized_preview": anonymized_preview_json,
+                "path_file_anonymized": gcp_path,
+                "completed_at": completed_at,
+                "job_id": job_id
+            })
+            conn.commit()
 
         logger.info(f"Anonymization results received for job {job_id}")
         return jsonify({"message": "Anonymization results received successfully"}), 200
@@ -432,21 +432,19 @@ def receive_error_notifications():
             logger.error("Missing job_id, stage or error message in Pub/Sub notification")
             return jsonify({"error": "Missing job_id, stage or error message"}), 200
 
-        # Update job status to error
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('SELECT job_id FROM jobs WHERE job_id = %s', (job_id,))
-                job = cur.fetchone()
-                
-                if job:
-                    cur.execute('UPDATE jobs SET status = %s, completed_at = %s WHERE job_id = %s', 
-                               ('error', datetime.now().isoformat(), job_id))
-                    conn.commit()
-                    logger.error(f"Error notification received for job {job_id} in stage {stage}: {error_message}")
-                    return jsonify({"message": "Error notification received successfully"}), 200
-                else:
-                    logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
-                    return jsonify({"error": "Job ID not found"}), 200
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT job_id FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+            job = result.mappings().first()
+            
+            if job:
+                conn.execute(text('UPDATE jobs SET status = :status, completed_at = :completed_at WHERE job_id = :job_id'), 
+                           {"status": 'error', "completed_at": datetime.now().isoformat(), "job_id": job_id})
+                conn.commit()
+                logger.error(f"Error notification received for job {job_id} in stage {stage}: {error_message}")
+                return jsonify({"message": "Error notification received successfully"}), 200
+            else:
+                logger.warning(f"Received error for unknown job {job_id} in stage {stage}")
+                return jsonify({"error": "Job ID not found"}), 200
                     
     except Exception as e:
         logger.error(f"Failed to process incoming Pub/Sub push: {e}", exc_info=True)
@@ -474,13 +472,25 @@ def noauth_upload_and_analyze():
 
         upload_at = datetime.now().isoformat()
         
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('''
-                    INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ''', (job_id, request.user_id, original_filename, 0, None, None, None, None, None, upload_at, None, 'uploaded'))
-                conn.commit()
+        with engine.connect() as conn:
+            conn.execute(text('''
+                INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
+                VALUES (:job_id, :user_id, :filename, :rows, :metadata, :path_file_analyzed, :method, :anonymized_preview, :path_file_anonymized, :upload_at, :completed_at, :status)
+            '''), {
+                "job_id": job_id,
+                "user_id": request.user_id,
+                "filename": original_filename,
+                "rows": 0,
+                "metadata": None,
+                "path_file_analyzed": None,
+                "method": None,
+                "anonymized_preview": None,
+                "path_file_anonymized": None,
+                "upload_at": upload_at,
+                "completed_at": None,
+                "status": 'uploaded'
+            })
+            conn.commit()
 
         if pubsub_manager:
             pubsub_manager.publish(Topics.DATA_UPLOAD_REQUESTS, {
@@ -507,10 +517,9 @@ def noauth_request_anonymization():
     if not all([job_id, method, user_selections is not None]):
         return jsonify({"error": "Missing job_id, method, or user_selections"}), 400
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-            job = cur.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
     
     if not job:
         return jsonify({"error": "Job not found"}), 404
@@ -519,7 +528,6 @@ def noauth_request_anonymization():
     if job['status'] != 'analyzed':
         return jsonify({"error": "Job is not ready for anonymization"}), 400
 
-    # Download processed file from GCP bucket
     gcp_path = job['path_file_analyzed']
     if not gcp_path:
         return jsonify({"error": "No analyzed file path found for this job"}), 400
@@ -530,7 +538,6 @@ def noauth_request_anonymization():
         processed_csv_content = blob.download_as_text()
         encoded_processed_csv = base64.b64encode(processed_csv_content.encode('utf-8')).decode('utf-8')
 
-        # Fix: metadata is already a JSON string, not a DataFrame
         metadata_json_content = job['metadata']
         encoded_metadata_json = base64.b64encode(metadata_json_content.encode('utf-8')).decode('utf-8')
 
@@ -544,12 +551,10 @@ def noauth_request_anonymization():
                 'metadata_content_base64': encoded_metadata_json
             }, attributes={'job_id': job_id})
 
-        # Update job status
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('UPDATE jobs SET status = %s, method = %s WHERE job_id = %s', 
-                           ('anonymization_requested', method, job_id))
-                conn.commit()
+        with engine.connect() as conn:
+            conn.execute(text('UPDATE jobs SET status = :status, method = :method WHERE job_id = :job_id'), 
+                       {"status": 'anonymization_requested', "method": method, "job_id": job_id})
+            conn.commit()
 
         return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
     
@@ -560,10 +565,9 @@ def noauth_request_anonymization():
 @app.route('/noauth_get_status/<job_id>', methods=['GET'])
 def noauth_get_status(job_id):
     request.user_id = MOCK_USER_ID
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-            job = cur.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
     
     if not job:
         return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
@@ -586,10 +590,9 @@ def noauth_get_status(job_id):
 @app.route('/noauth_download/<job_id>', methods=['GET'])
 def noauth_download(job_id):
     request.user_id = MOCK_USER_ID
-    with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
-                job = cur.fetchone()
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
     
     if not job:
         return jsonify({"error": "Job not found"}), 404
@@ -599,7 +602,6 @@ def noauth_download(job_id):
         return jsonify({"error": "File not ready. Still processing."}), 400
     
     try:
-        # Download the file from GCP bucket
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(job['path_file_anonymized'])
         if not blob.exists():
