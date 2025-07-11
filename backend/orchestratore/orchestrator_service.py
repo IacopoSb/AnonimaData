@@ -458,22 +458,165 @@ MOCK_USER_ID = "mocked-user"
 @app.route('/noauth_upload_and_analyze', methods=['POST'])
 def noauth_upload_and_analyze():
     request.user_id = MOCK_USER_ID
-    return upload_and_analyze()
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        job_id = str(uuid.uuid4()) + '-' + datetime.now().strftime("%Y%m%d%H%M%S")
+        original_filename = file.filename
+
+        file_content_bytes = file.read()
+        encoded_file_content = base64.b64encode(file_content_bytes).decode('utf-8')
+
+        upload_at = datetime.now().isoformat()
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    INSERT INTO jobs (job_id, user_id, filename, rows, metadata, path_file_analyzed, method, anonymized_preview, path_file_anonymized, upload_at, completed_at, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (job_id, request.user_id, original_filename, 0, None, None, None, None, None, upload_at, None, 'uploaded'))
+                conn.commit()
+
+        if pubsub_manager:
+            pubsub_manager.publish(Topics.DATA_UPLOAD_REQUESTS, {
+                'job_id': job_id,
+                'filename': original_filename,
+                'file_content_base64': encoded_file_content
+            }, attributes={'job_id': job_id})
+
+        return jsonify({
+            "message": "File uploaded and analysis initiated",
+            "job_id": job_id,
+            "filename": original_filename
+        }), 202
 
 @app.route('/noauth_request_anonymization', methods=['POST'])
 def noauth_request_anonymization():
     request.user_id = MOCK_USER_ID
-    return request_anonymization()
+    data = request.json
+    job_id = data.get('job_id')
+    method = data.get('method')
+    params = data.get('params')
+    user_selections = data.get('user_selections')
+
+    if not all([job_id, method, user_selections is not None]):
+        return jsonify({"error": "Missing job_id, method, or user_selections"}), 400
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+            job = cur.fetchone()
+    
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job['user_id'] != request.user_id:
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+    if job['status'] != 'analyzed':
+        return jsonify({"error": "Job is not ready for anonymization"}), 400
+
+    # Download processed file from GCP bucket
+    gcp_path = job['path_file_analyzed']
+    if not gcp_path:
+        return jsonify({"error": "No analyzed file path found for this job"}), 400
+
+    try:
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(gcp_path)
+        processed_csv_content = blob.download_as_text()
+        encoded_processed_csv = base64.b64encode(processed_csv_content.encode('utf-8')).decode('utf-8')
+
+        # Fix: metadata is already a JSON string, not a DataFrame
+        metadata_json_content = job['metadata']
+        encoded_metadata_json = base64.b64encode(metadata_json_content.encode('utf-8')).decode('utf-8')
+
+        if pubsub_manager:
+            pubsub_manager.publish(Topics.ANONYMIZATION_REQUESTS, {
+                'job_id': job_id,
+                'method': method,
+                'params': params,
+                'user_selections': user_selections,
+                'processed_data_content_base64': encoded_processed_csv,
+                'metadata_content_base64': encoded_metadata_json
+            }, attributes={'job_id': job_id})
+
+        # Update job status
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('UPDATE jobs SET status = %s, method = %s WHERE job_id = %s', 
+                           ('anonymization_requested', method, job_id))
+                conn.commit()
+
+        return jsonify({"message": "Anonymization request published", "job_id": job_id}), 202
+    
+    except Exception as e:
+        logger.error(f"Error in request_anonymization: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/noauth_get_status/<job_id>', methods=['GET'])
 def noauth_get_status(job_id):
     request.user_id = MOCK_USER_ID
-    return get_status(job_id)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+            job = cur.fetchone()
+    
+    if not job:
+        return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
+    if job['user_id'] != request.user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    response_status = {
+        "job_id": job['job_id'],
+        "filename": job['filename'],
+        "status": job['status'],
+        "upload_at": job['upload_at'],
+        "completed_at": job['completed_at'],
+        "rows": job['rows'],
+        "method": job['method'],
+        "metadata": json.loads(job['metadata']) if job['metadata'] else None,        
+        "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None
+    }
+    return jsonify(response_status), 200
 
 @app.route('/noauth_download/<job_id>', methods=['GET'])
 def noauth_download(job_id):
     request.user_id = MOCK_USER_ID
-    return download_full_file(job_id)
+    with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT * FROM jobs WHERE job_id = %s', (job_id,))
+                job = cur.fetchone()
+    
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job['user_id'] != request.user_id:
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+    if job['status'] != 'anonymized':
+        return jsonify({"error": "File not ready. Still processing."}), 400
+    
+    try:
+        # Download the file from GCP bucket
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(job['path_file_anonymized'])
+        if not blob.exists():
+            return jsonify({"error": "Anonymized file not found in GCP bucket"}), 404
+        
+        file_content = blob.download_as_text()
+        download_name = job['filename'] if job['filename'] else f"anonymized_file_{job_id}.csv"
+        
+        return send_file(
+            BytesIO(file_content.encode("utf-8")),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype='text/csv'
+        )
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}")
+        return jsonify({"error": "Error downloading file"}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)
