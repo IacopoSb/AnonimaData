@@ -245,6 +245,7 @@ def get_files():
                 'method': job['method'],
                 'rows': job['rows'],
                 'download_url': f"/download/{job['job_id']}",
+                'delete_url': f"/delete/{job['job_id']}",
                 'datetime_completition':job['completed_at'],
                 'datetime_upload': job['upload_at']
             })
@@ -294,6 +295,36 @@ def download_full_file(job_id):
         logger.error(f"Error downloading file: {e}")
         return jsonify({"error": "Error downloading file"}), 500
 
+@app.route('/delete/<job_id>', methods=['DELETE'])
+@firebase_auth_required
+def delete_job(job_id):
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+        job = result.mappings().first()
+    
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job['user_id'] != request.user_id:
+        return jsonify({"error": "Unauthorized access to this job"}), 403
+
+    try:
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blobAnonymized = bucket.blob(job['path_file_anonymized'])
+        if blobAnonymized.exists():
+            blobAnonymized.delete()
+        blobAnalyzed = bucket.blob(job['path_file_analyzed'])
+        if blobAnalyzed.exists():
+            blobAnalyzed.delete()
+
+        with engine.connect() as conn:
+            conn.execute(text('DELETE FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+            conn.commit()
+
+        return jsonify({"message": "File deleted successfully"}), 200
+    except Exception as e:
+        logger.error(f"Error deleting file: {e}")
+        return jsonify({"error": "Error deleting file"}), 500
+
 # === PUB/SUB ENDPOINTS ===
 @app.route('/receive_analysis_results', methods=['POST'])
 def receive_analysis_results():
@@ -326,7 +357,7 @@ def receive_analysis_results():
             processed_df = pd.read_csv(StringIO(processed_csv))
             metadata_json = base64.b64decode(metadata_content_base64).decode('utf-8')
 
-            gcp_path = f"processed_data/{job_id}/processed_data.csv"
+            gcp_path = f"{job_id}/processed_data.csv"
             bucket = storage_client.bucket(BUCKET_NAME)
             blob = bucket.blob(gcp_path)
             blob.upload_from_string(processed_df.to_csv(index=False), content_type='text/csv')
@@ -383,19 +414,29 @@ def receive_anonymization_results():
         anonymized_sample_csv = base64.b64decode(anonymized_sample_content_base64).decode('utf-8')
         anonymized_sample_df = pd.read_csv(StringIO(anonymized_sample_csv))
 
-        gcp_path = f"anonymized_data/{job_id}/anonymized_data.csv"
+        gcp_path = f"{job_id}/anonymized_data.csv"
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(gcp_path)
         blob.upload_from_string(anonymized_df.to_csv(index=False), content_type='text/csv')
+
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT path_file_analyzed FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+            job = result.mappings().first()
+        analyzed_file_path = job['path_file_analyzed']
+        if analyzed_file_path:
+            analyzed_blob = bucket.blob(analyzed_file_path)
+            if analyzed_blob.exists():
+                analyzed_blob.delete()
 
         anonymized_preview_json = anonymized_sample_df.to_json(orient='records', indent=4)
 
         with engine.connect() as conn:
             conn.execute(text('''
                 UPDATE jobs
-                SET status = :status, anonymized_preview = :anonymized_preview, path_file_anonymized = :path_file_anonymized, completed_at = :completed_at
+                SET path_file_analyzed = :path_file_analyzed, status = :status, anonymized_preview = :anonymized_preview, path_file_anonymized = :path_file_anonymized, completed_at = :completed_at
                 WHERE job_id = :job_id
             '''), {
+                "path_file_analyzed": None,
                 "status": "anonymized",
                 "anonymized_preview": anonymized_preview_json,
                 "path_file_anonymized": gcp_path,
