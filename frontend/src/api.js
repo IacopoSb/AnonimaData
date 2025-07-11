@@ -20,7 +20,7 @@ const getAuthHeader = async () => {
   return {
     Authorization: `Bearer ${token}`,
   };
-  
+
 }
 
 
@@ -39,7 +39,7 @@ export const checkJobStatus = async (jobId) => {
 
     if (analysisResponse.ok) {
       const analysisData = await analysisResponse.json();
-      
+
       // Se l'analisi è completata, restituisci i dati dell'analisi
       if (analysisData.status === 'analyzed') {
         // Estrai le colonne sia da metadata (array di oggetti) che da metadata.columns (array di stringhe)
@@ -71,11 +71,11 @@ export const checkJobStatus = async (jobId) => {
         }*/
         let column = [];
         column = analysisData.metadata.map(col => col.column_name);
-        
+
         return {
           status: 'anonymized',
           job_id: jobId,
-          columns:column,
+          columns: column,
           anonymized_preview: analysisData.anonymized_preview,
           metadata: analysisData.metadata
         };
@@ -89,9 +89,9 @@ export const checkJobStatus = async (jobId) => {
       };
     }
 
-    
-    
-    
+
+
+
   } catch (error) {
     console.error('Status check error:', error);
     throw new Error(`Status check failed: ${error.message}`);
@@ -172,15 +172,15 @@ export const downloadFile = async (jobId) => {
     method: 'GET',
     headers,
   });
-  
+
   if (!response.ok) {
     throw new Error('Errore nel download del file');
   }
-  
+
   return response.blob();
 };
 
-
+/*
 // 5. Get files - ora usa l'endpoint corretto e gestisce la risposta
 export const getFiles = async () => {
   const headers = await getAuthHeader();
@@ -223,6 +223,60 @@ export const getFiles = async () => {
     files: []
   };
 };
+*/
+
+
+
+export const getFiles = async () => {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_BASE_URL}/get_files`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Get files failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  console.log('Get files response:', data);
+
+  // Nuova struttura: array con due oggetti, uno con stats, uno con files
+  if (Array.isArray(data) && data.length >= 2) {
+    const statsObj = data.find(item => item.stats);
+    const filesObj = data.find(item => item.files);
+
+    const statistics = statsObj?.stats || [];
+    const files = filesObj?.files || [];
+
+    return {
+      totalDatasets: statistics[0]?.datasets || 0,
+      completedJobs: files.filter(f => f.status === 'completed').length,
+      dataProtected: statistics[0]?.total_rows || 0,
+      files
+    };
+  } else if (typeof data === 'object' && data.stats && data.files) {
+    // In caso venga usata ancora la struttura ad oggetto
+    const statistics = data.stats;
+    const files = data.files;
+
+    return {
+      totalDatasets: statistics[0]?.datasets || 0,
+      completedJobs: files.filter(f => f.status === 'completed').length,
+      dataProtected: statistics[0]?.total_rows || 0,
+      files
+    };
+  }
+
+  // Fallback
+  return {
+    totalDatasets: 0,
+    completedJobs: 0,
+    dataProtected: 0,
+    files: []
+  };
+};
+
 
 
 // 6. Nuova funzione per esportare JSON
@@ -232,10 +286,32 @@ export const exportAnonymizationJSON = async (jobId) => {
     method: 'GET',
     headers,
   });
-  
+
   if (!response.ok) {
     throw new Error('Errore nell\'esportazione JSON');
   }
-  
+
   return response.blob();
+};
+
+
+
+export const deleteFile = async (jobId) => {
+  const headers = await getAuthHeader();
+  const response = await fetch(`${API_BASE_URL}/delete/${jobId}`, {
+    method: 'DELETE',
+    headers,
+  });
+
+  if (!response.ok) {
+    // Gestisci gli errori in base alla risposta del tuo backend
+    const errorData = await response.json().catch(() => ({ message: 'Errore sconosciuto' }));
+    throw new Error(`Cancellazione file fallita: ${response.status} - ${errorData.message || response.statusText}`);
+  }
+
+  // Se la cancellazione ha successo, il backend potrebbe rispondere con uno stato 200 OK senza corpo,
+  // oppure con un messaggio di conferma. Non è strettamente necessario leggere il JSON qui
+  // a meno che non ti aspetti dati specifici di ritorno.
+  // const data = await response.json(); // Se il tuo backend restituisce un JSON alla cancellazione
+  return true; // Indica che l'operazione ha avuto successo
 };

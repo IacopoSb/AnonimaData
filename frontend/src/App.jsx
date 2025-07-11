@@ -34,32 +34,32 @@ function objectsToRows(objects, columns) {
 }
 
 import React, { useState, useEffect } from 'react';
-import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, AlertCircle, Clock, Database, FileText } from 'lucide-react';
-import { uploadFile, getFiles, anonymizeData, downloadFile,checkJobStatus  } from './api';
+import { Upload, Download, Settings, Eye, Lock, User, LogOut, CheckCircle, AlertCircle, Clock, Database, FileText, Trash } from 'lucide-react';
+import { uploadFile, getFiles, anonymizeData, downloadFile, checkJobStatus, deleteFile } from './api';
 
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import '../src/firebase'; // Assicura che Firebase sia inizializzato
 
 const anonymizationAlgorithms = [
-  { 
-    id: 'k-anonymity', 
-    name: 'K-Anonymity', 
+  {
+    id: 'k-anonymity',
+    name: 'K-Anonymity',
     description: 'Groups records so each group has at least k identical records',
     params: [{ name: 'k', type: 'number', min: 2, max: 100, default: 5, description: 'Minimum group size' }]
   },
-  { 
-    id: 'l-diversity', 
-    name: 'L-Diversity', 
+  {
+    id: 'l-diversity',
+    name: 'L-Diversity',
     description: 'Ensures each group has at least l different sensitive values',
     params: [
       { name: 'l', type: 'number', min: 2, max: 50, default: 3, description: 'Minimum diversity' },
       { name: 'sensitive_column', type: 'select', description: 'Sensitive attribute column' }
     ]
   },
- 
-  { 
-    id: 'differential-privacy', 
-    name: 'Differential-Privacy', 
+
+  {
+    id: 'differential-privacy',
+    name: 'Differential-Privacy',
     description: 'Adds calibrated noise to protect individual privacy',
     params: [{ name: 'epsilon', type: 'number', min: 0.1, max: 10, step: 0.1, default: 1.0, description: 'Privacy budget (lower = more private)' }]
   }
@@ -80,15 +80,18 @@ const AnonimaData = () => {
   const [datasets, setDatasets] = useState([]);
   const [columnConfig, setColumnConfig] = useState({});
   const [stats, setStats] = useState({
-  totalDatasets: 0,
-  completedJobs: 0,
-  dataProtected: 0
+    totalDatasets: 0,
+    dataProtected: 0 // Totale righe protette
   });
   // stati per il polling
   const [jobId, setJobId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingMessage, setProcessingMessage] = useState('');
+  // --- QUESTI SONO I TRE STATI PER LA PREVIEW ---
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [currentPreviewData, setCurrentPreviewData] = useState([]);
+  const [currentPreviewFilename, setCurrentPreviewFilename] = useState('');
 
   // Gestione autenticazione con Firebase Modular SDK
   useEffect(() => {
@@ -154,6 +157,47 @@ const AnonimaData = () => {
   };
 
 
+
+
+
+  // *** FUNZIONE PER LA PREVIEW ***
+  const handlePreview = (jobId) => {
+    const datasetToPreview = datasets.find(d => d.id === jobId);
+    console.log('Dataset to preview:', datasetToPreview);
+    console.log('preview id:', jobId);
+    if (datasetToPreview && datasetToPreview.anonymizedPreview) {
+      setCurrentPreviewData(datasetToPreview.anonymizedPreview);
+      setCurrentPreviewFilename(datasetToPreview.name);
+      setShowPreviewModal(true);
+    } else {
+      console.warn(`Preview data not found for job_id: ${jobId}`);
+    }
+  };
+
+
+  const handleDelete = async (jobId, filename) => {
+    if (window.confirm(`Sei sicuro di voler eliminare il dataset "${filename}"? Questa operazione è irreversibile.`)) {
+      try {
+        setProcessingStatus('deleting'); // Puoi usare uno stato di caricamento per il pulsante
+        setProcessingMessage(`Eliminazione di "${filename}" in corso...`);
+
+        await deleteFile(jobId);
+
+        setProcessingStatus('idle');
+        setProcessingMessage(`Dataset "${filename}" eliminato con successo!`);
+        // Dopo l'eliminazione, ricarica la lista dei dataset per aggiornare la tabella
+        await loadStats();
+
+      } catch (error) {
+        console.error('Errore durante l\'eliminazione del file:', error);
+        setProcessingStatus('error');
+        setProcessingMessage(`Errore durante l'eliminazione di "${filename}": ${error.message}`);
+        // Puoi aggiungere un setTimeout per far sparire il messaggio di errore dopo un po'
+        setTimeout(() => setProcessingMessage(''), 5000);
+      }
+    }
+  };
+
   //  handleFileUpload 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -201,97 +245,97 @@ const AnonimaData = () => {
   };
 
 
-// Funzione per avviare il polling
-const startPolling = (jobId) => {
-  setJobId(jobId);
-  setProcessingStatus('processing');
-  setProcessingMessage('Analyzing your dataset...');
-  
-  const interval = setInterval(async () => {
-    try {
-      const response = await checkJobStatus(jobId);
-      console.log("Polling status:", response);
-      if (response.status === 'analyzed') {
-        setProcessingStatus('completed');
-        setProcessingMessage('Analysis completed successfully!');
-        setUploadProgress(100);
-        
-        let columns = response.processed_data_info?.columns
-          || response.anonymized_data_info?.columns
-          || response.columns
-          || [];
-        let rows;
-        
-        if (Array.isArray(response.processed_data_preview)) {
-          rows = objectsToRows(response.processed_data_preview, columns);
-        } else if (Array.isArray(response.sample)) {
-          rows = objectsToRows(response.sample, columns);
+  // Funzione per avviare il polling
+  const startPolling = (jobId) => {
+    setJobId(jobId);
+    setProcessingStatus('processing');
+    setProcessingMessage('Analyzing your dataset...');
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await checkJobStatus(jobId);
+        console.log("Polling status:", response);
+        if (response.status === 'analyzed') {
+          setProcessingStatus('completed');
+          setProcessingMessage('Analysis completed successfully!');
+          setUploadProgress(100);
+
+          let columns = response.processed_data_info?.columns
+            || response.anonymized_data_info?.columns
+            || response.columns
+            || [];
+          let rows;
+
+          if (Array.isArray(response.processed_data_preview)) {
+            rows = objectsToRows(response.processed_data_preview, columns);
+          } else if (Array.isArray(response.sample)) {
+            rows = objectsToRows(response.sample, columns);
+          } else {
+            rows = [];
+          }
+          setDataPreview({ columns, rows });
+          clearInterval(interval);
+          setPollingInterval(null);
+          setCurrentView('configure');
+        } else if (response.status === 'anonymized' || response.status === 'completed') {
+          setProcessingStatus('completed');
+          setProcessingMessage('Anonymization completed successfully!');
+          setUploadProgress(100);
+          /*
+          // Estrai colonne e dati dalla risposta
+          let columns =
+            (response.columns) ||
+            (response.metadata && Array.isArray(response.metadata)
+              ? response.metadata.map(m => m.column_name)
+              : null) ||
+            (response.columns) ||
+            (response.anonymized_preview && response.anonymized_preview.length > 0
+              ? Object.keys(response.anonymized_preview[0])
+              : []);
+          let anonymizedData =
+            response.anonymized_preview ||
+            response.anonymized_data_preview ||
+            response.anonymized_data ||
+            response.rows ||
+            response.sample ||
+            [];
+          let rows = Array.isArray(anonymizedData)
+            ? objectsToRows(anonymizedData, columns)
+            : [];
+          */
+          console.log('Anonymization response:', response);
+          let columns = response.columns;
+          console.log('Columns:', columns);
+          let anonymizedData = response.anonymized_preview;
+          console.log('Anonymization data:', anonymizedData);
+          let rows = objectsToRows(anonymizedData, columns);
+          setAnonymizedPreview({ columns, rows });
+          window.__lastAnonymizedRaw = anonymizedData;
+          console.log('Set anonymizedPreview:', { columns, rows });
+          clearInterval(interval);
+          setPollingInterval(null);
+        } else if (response.status === 'error') {
+          // Errore
+          setProcessingStatus('error');
+          setProcessingMessage(response.details || 'An error occurred during processing');
+          clearInterval(interval);
+          setPollingInterval(null);
+
         } else {
-          rows = [];
+          // Ancora in elaborazione
+          setProcessingMessage(response.details || 'Processing your data...');
         }
-        setDataPreview({ columns, rows });
-        clearInterval(interval);
-        setPollingInterval(null);
-        setCurrentView('configure');
-       } else if (response.status === 'anonymized' || response.status === 'completed') {
-        setProcessingStatus('completed');
-        setProcessingMessage('Anonymization completed successfully!');
-        setUploadProgress(100);
-        /*
-        // Estrai colonne e dati dalla risposta
-        let columns =
-          (response.columns) ||
-          (response.metadata && Array.isArray(response.metadata)
-            ? response.metadata.map(m => m.column_name)
-            : null) ||
-          (response.columns) ||
-          (response.anonymized_preview && response.anonymized_preview.length > 0
-            ? Object.keys(response.anonymized_preview[0])
-            : []);
-        let anonymizedData =
-          response.anonymized_preview ||
-          response.anonymized_data_preview ||
-          response.anonymized_data ||
-          response.rows ||
-          response.sample ||
-          [];
-        let rows = Array.isArray(anonymizedData)
-          ? objectsToRows(anonymizedData, columns)
-          : [];
-        */
-        console.log('Anonymization response:', response);
-        let columns = response.columns;
-        console.log('Columns:', columns);
-        let anonymizedData = response.anonymized_preview;
-        console.log('Anonymization data:', anonymizedData);
-        let rows = objectsToRows(anonymizedData, columns);
-        setAnonymizedPreview({ columns, rows });
-        window.__lastAnonymizedRaw = anonymizedData;
-        console.log('Set anonymizedPreview:', { columns, rows });
-        clearInterval(interval);
-        setPollingInterval(null);
-      } else if (response.status === 'error') {
-        // Errore
-        setProcessingStatus('error');
-        setProcessingMessage(response.details || 'An error occurred during processing');
-        clearInterval(interval);
-        setPollingInterval(null);
-        
-      } else {
-        // Ancora in elaborazione
-        setProcessingMessage(response.details || 'Processing your data...');
+      } catch (error) {
+        console.error('Polling error:', error);
+        setProcessingMessage('Checking status...');
       }
-    } catch (error) {
-      console.error('Polling error:', error);
-      setProcessingMessage('Checking status...');
-    }
-  }, 1000);
-  
-  setPollingInterval(interval);
-};
+    }, 1000);
+
+    setPollingInterval(interval);
+  };
 
 
- useEffect(() => {
+  useEffect(() => {
     return () => {
       if (pollingInterval) {
         clearInterval(pollingInterval);
@@ -300,66 +344,81 @@ const startPolling = (jobId) => {
   }, [pollingInterval]);
 
 
-
-// 3. Aggiorna handleAnonymize per usare il nuovo formato
-const handleAnonymize = async () => {
-  setProcessingStatus('processing');
-  setCurrentView('preview');
-  setProcessingMessage('Starting anonymization process...');
-
-  try {
-    const userSelection = {};
-    
-    dataPreview.columns.forEach(column => {
-      userSelection[column] = {
-        quasi: columnConfig[column]?.quasi || false,
-        sensitive: columnConfig[column]?.sensitive || false
-      };
-    });
-
-    const params = {
-      job_id: jobId, // Assicurati che questo sia disponibile
-      algorithm: selectedAlgorithm,
-      params: algorithmParams,
-      userSelection: userSelection
-    };
-
-    console.log('Sending anonymization request:', params);
-
-    const response = await anonymizeData(params);
-    console.log('Anonymization response:', response);
-
-    if (response.job_id) {
-      // Continua il polling per l'anonimizzazione
-      startPolling(response.job_id);
-    } else {
-      throw new Error('No job_id returned from anonymization request');
+ useEffect(() => {
+    // Questa funzione si attiva ogni volta che currentView cambia.
+    // Vogliamo resettare gli stati solo quando l'utente *entra* nella vista 'upload'.
+    if (currentView === 'upload') {
+      setUploadedFile(null); // Resetta il file caricato
+      setProcessingMessage(''); // Resetta il messaggio di processo
+      setSelectedAlgorithm(''); // Resetta l'algoritmo selezionato
+      setAlgorithmParams({}); // Resetta i parametri dell'algoritmo
+      setDataPreview(null); // Resetta la preview dei dati originali
+      // Non resettare anonymizedPreview qui, perché è legata al dataset
+      // e non necessariamente all'upload corrente.
     }
-  } catch (error) {
-    console.error('Errore anonimizzazione:', error);
-    setProcessingStatus('error');
-    setProcessingMessage('Anonymization failed. Please try again.');
-  }
-};
+  }, [currentView]); // La dipendenza è currentView
 
 
-// 4. Aggiorna handleDownload per usare il nuovo formato
-const handleDownload = async (jobId) => {
-  try {
-    const fileBlob = await downloadFile(jobId);
 
-    const url = window.URL.createObjectURL(fileBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `anonymized_data_${jobId}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-  } catch (error) {
-    console.error('Errore nel download:', error);
-  }
-};
+  // 3. Aggiorna handleAnonymize per usare il nuovo formato
+  const handleAnonymize = async () => {
+    setProcessingStatus('processing');
+    setCurrentView('preview');
+    setProcessingMessage('Starting anonymization process...');
+
+    try {
+      const userSelection = {};
+
+      dataPreview.columns.forEach(column => {
+        userSelection[column] = {
+          quasi: columnConfig[column]?.quasi || false,
+          sensitive: columnConfig[column]?.sensitive || false
+        };
+      });
+
+      const params = {
+        job_id: jobId, // Assicurati che questo sia disponibile
+        algorithm: selectedAlgorithm,
+        params: algorithmParams,
+        userSelection: userSelection
+      };
+
+      console.log('Sending anonymization request:', params);
+
+      const response = await anonymizeData(params);
+      console.log('Anonymization response:', response);
+
+      if (response.job_id) {
+        // Continua il polling per l'anonimizzazione
+        startPolling(response.job_id);
+      } else {
+        throw new Error('No job_id returned from anonymization request');
+      }
+    } catch (error) {
+      console.error('Errore anonimizzazione:', error);
+      setProcessingStatus('error');
+      setProcessingMessage('Anonymization failed. Please try again.');
+    }
+  };
+
+
+  // 4. Aggiorna handleDownload per usare il nuovo formato
+  const handleDownload = async (jobId, fileName) => {
+    try {
+      const fileBlob = await downloadFile(jobId);
+
+      const url = window.URL.createObjectURL(fileBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `anonymized_${fileName}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Errore nel download:', error);
+    }
+  };
 
   // Save anonymized dataset
   const handleSave = () => {
@@ -373,39 +432,70 @@ const handleDownload = async (jobId) => {
     };
     setDatasets(prev => [...prev, newDataset]);
     setCurrentView('dashboard');
+    loadStats();
   };
 
-// 5. Aggiorna loadStats per usare la nuova struttura
-const loadStats = async () => {
-  try {
-    const data = await getFiles();
-    console.log('Stats data:', data);
-    
-    setStats({
-      totalDatasets: data.totalDatasets || 0,
-      completedJobs: data.completedJobs || 0,
-      dataProtected: data.dataProtected || 0
-    });
-    
-    // Opzionalmente, aggiorna anche la lista dei dataset
-    if (data.files) {
-      const transformedDatasets = data.files.map(file => ({
-        id: file.job_id,
-        name: file.filename,
-        algorithm: file.method_used || 'Unknown',
-        created: new Date().toLocaleDateString(), // L'API non fornisce la data
-        status: file.status,
-        rows: file.rows || 0,
-        filename: file.job_id // Per il download
-      }));
-      
-      setDatasets(transformedDatasets);
-    }
-  } catch (error) {
-    console.error('Errore nel caricamento delle statistiche:', error);
-  }
-};
 
+
+  const loadStats = async () => {
+    try {
+      // getFiles ora restituisce un oggetto consolidato, non un array.
+      const consolidatedData = await getFiles();
+      console.log('Dati consolidati ricevuti da getFiles:', consolidatedData);
+
+      setStats({
+        totalDatasets: consolidatedData.totalDatasets || 0,
+        completedJobs: consolidatedData.completedJobs || 0,
+        dataProtected: consolidatedData.dataProtected || 0
+      });
+
+      if (consolidatedData.files && consolidatedData.files.length > 0) {
+        const transformedDatasets = consolidatedData.files.map(file => ({
+          id: file.job_id,
+          name: file.filename,
+          algorithm: file.method || 'Unknown',
+          created: file.datetime_completition
+            ? new Date(file.datetime_completition).toLocaleString()
+            : (file.datetime_upload ? new Date(file.datetime_upload).toLocaleString() : 'N/A'),
+          status: file.status,
+          rows: file.rows || 0,
+          filename: file.job_id,
+          anonymizedPreview: file.anonymized_preview || [],
+          rawCompletionDate: file.datetime_completition ? new Date(file.datetime_completition) : null,
+          rawUploadDate: new Date(file.datetime_upload),
+        }));
+
+        // --- LOGICA DI ORDINAMENTO ---
+        transformedDatasets.sort((a, b) => {
+          // I dataset non-anonymized vanno sempre prima
+          if (a.status !== 'anonymized' && b.status === 'anonymized') {
+            return -1;
+          }
+          if (a.status === 'anonymized' && b.status !== 'anonymized') {
+            return 1;
+          }
+
+          const dateA = a.rawCompletionDate || a.rawUploadDate;
+          const dateB = b.rawCompletionDate || b.rawUploadDate;
+
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return 1;
+          if (!dateB) return -1;
+
+          return dateB.getTime() - dateA.getTime();
+        });
+        // --- FINE LOGICA DI ORDINAMENTO ---
+
+        setDatasets(transformedDatasets);
+      } else {
+        setDatasets([]);
+      }
+    } catch (error) {
+      console.error('Errore nel caricamento delle statistiche:', error);
+      setStats({ totalDatasets: 0, completedJobs: 0, dataProtected: 0 });
+      setDatasets([]);
+    }
+  };
   // Login View
   if (loading) {
     return (
@@ -431,7 +521,7 @@ const loadStats = async () => {
             <h1 className="text-3xl font-bold text-white mb-2">AnonimaData</h1>
             <p className="text-gray-300">Secure Dataset Anonymization Platform</p>
           </div>
-          
+
           {authError && (
             <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
               <div className="flex items-center gap-2">
@@ -440,8 +530,8 @@ const loadStats = async () => {
               </div>
             </div>
           )}
-          
-          <button 
+
+          <button
             onClick={handleLogin}
             disabled={!firebaseLoaded}
             className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white font-semibold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg flex items-center justify-center gap-3"
@@ -449,7 +539,7 @@ const loadStats = async () => {
             <User className="w-5 h-5" />
             {firebaseLoaded ? 'Sign in with Google' : 'Loading...'}
           </button>
-          
+
           <div className="mt-6 text-center">
             <p className="text-gray-400 text-sm">
               Secure authentication powered by Firebase
@@ -472,29 +562,30 @@ const loadStats = async () => {
               </div>
               <h1 className="text-2xl font-bold text-gray-900">AnonimaData</h1>
             </div>
-            
+
             <nav className="hidden md:flex space-x-8">
-              <button 
-                onClick={() => setCurrentView('dashboard')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  currentView === 'dashboard' ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:text-gray-900'
-                }`}
+              <button
+                onClick={() => {
+                  setCurrentView('dashboard');
+                  loadStats(); // Aggiungi questa riga
+                }}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'dashboard' ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:text-gray-900'
+                  }`}
               >
                 Dashboard
               </button>
-              <button 
+              <button
                 onClick={() => setCurrentView('upload')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  currentView === 'upload' ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:text-gray-900'
-                }`}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentView === 'upload' ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:text-gray-900'
+                  }`}
               >
                 Upload Data
               </button>
             </nav>
 
             <div className="flex items-center gap-4">
-              <img 
-                src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=6366f1&color=fff`} 
+              <img
+                src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=6366f1&color=fff`}
                 alt={user.name}
                 className="w-8 h-8 rounded-full"
                 onError={(e) => {
@@ -505,7 +596,7 @@ const loadStats = async () => {
                 <span className="text-sm font-medium text-gray-700 block">{user.name}</span>
                 <span className="text-xs text-gray-500">{user.email}</span>
               </div>
-              <button 
+              <button
                 onClick={handleLogout}
                 className="text-gray-400 hover:text-gray-600 transition-colors p-2 rounded-lg hover:bg-gray-100"
                 title="Sign out"
@@ -523,7 +614,7 @@ const loadStats = async () => {
           <div className="space-y-8">
             <div className="flex justify-between items-center">
               <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
-              <button 
+              <button
                 onClick={() => setCurrentView('upload')}
                 className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
               >
@@ -532,33 +623,23 @@ const loadStats = async () => {
               </button>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Schede Statistiche */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6"> {/* Cambiato md:grid-cols-3 in md:grid-cols-2 */}
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Total Datasets</p>
+                    <p className="text-sm font-medium text-gray-600">Dataset Totali</p>
                     <p className="text-3xl font-bold text-gray-900">{stats.totalDatasets}</p>
                   </div>
                   <Database className="w-8 h-8 text-blue-600" />
                 </div>
               </div>
-              
+
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Completed Jobs</p>
-                    <p className="text-3xl font-bold text-gray-900">{stats.completedJobs}</p>
-                  </div>
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Data Protected</p>
-                    <p className="text-3xl font-bold text-gray-900">{stats.totalDatasets}</p>
+                    <p className="text-sm font-medium text-gray-600">Righe Totali Protette</p> {/* Etichetta aggiornata */}
+                    <p className="text-3xl font-bold text-gray-900">{stats.dataProtected}</p> {/* Ora mostra correttamente dataProtected (che deriva da total_rows) */}
                   </div>
                   <Lock className="w-8 h-8 text-purple-600" />
                 </div>
@@ -570,7 +651,7 @@ const loadStats = async () => {
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900">Your Anonymized Datasets</h3>
               </div>
-              
+
               {datasets.length === 0 ? (
                 <div className="p-12 text-center">
                   <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -584,7 +665,8 @@ const loadStats = async () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dataset</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Algorithm</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rows</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                        {/* Intestazione della colonna modificata */}
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completed / Uploaded</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -603,24 +685,48 @@ const loadStats = async () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {dataset.rows.toLocaleString()}
                           </td>
+                          {/* Visualizzazione della data di completamento/upload */}
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {dataset.created}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              <CheckCircle className="w-3 h-3 mr-1" />
-                              {dataset.status}
-                            </span>
+                            {/* Stile e icona condizionali per lo status */}
+                            {dataset.status === 'anonymized' ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                {dataset.status}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                <Clock className="w-3 h-3 mr-1" />
+                                {dataset.status}
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button className="text-blue-600 hover:text-blue-900 mr-4"
-                             onClick={() => handleDownload(dataset.job_id)}
+                            {/* Pulsanti visibili solo se lo status è 'anonymized' */}
+                            {dataset.status === 'anonymized' && (
+                              <>
+                                <button className="text-blue-600 hover:text-blue-900 mr-4"
+                                  onClick={() => handleDownload(dataset.id,dataset.name)}
+                                >
+                                  <Download className="w-4 h-4" />
+                                </button>
+                                <button className="text-purple-600 hover:text-purple-900 mr-4"
+                                  onClick={() => handlePreview(dataset.id)}>
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            {/* Pulsante di cancellazione - visibile per tutti i dataset (o con logica specifica) */}
+                            {/* Potresti voler renderlo visibile solo per determinati stati, ad es. 'anonymized' o 'uploaded' */}
+                            <button className="text-red-600 hover:text-red-900"
+                              onClick={() => handleDelete(dataset.id, dataset.name)}
+                              title="Delete Dataset"
                             >
-                              <Download className="w-4 h-4" />
+                              <Trash className="w-4 h-4" />
                             </button>
-                            <button className="text-purple-600 hover:text-purple-900">
-                              <Eye className="w-4 h-4" />
-                            </button>
+
                           </td>
                         </tr>
                       ))}
@@ -631,17 +737,64 @@ const loadStats = async () => {
             </div>
           </div>
         )}
-
+        {/* --- NUOVO JSX DEL MODAL (ESEMPIO CON TAILWIND CSS) --- */}
+        {showPreviewModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+            <div className="relative p-5 border w-11/12 md:w-2/3 lg:w-1/2 shadow-lg rounded-md bg-white">
+              <div className="flex justify-between items-center pb-3">
+                <h3 className="text-lg font-bold">Preview: {currentPreviewFilename}</h3>
+              </div>
+              <div className="mt-2 text-sm text-gray-500 max-h-96 overflow-y-auto">
+                {currentPreviewData.length > 0 ? (
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {/* Estrai dinamicamente le intestazioni dalla prima riga di dati */}
+                        {Object.keys(currentPreviewData[0]).map((key) => (
+                          <th key={key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            {key}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {currentPreviewData.map((row, rowIndex) => (
+                        <tr key={rowIndex}>
+                          {Object.values(row).map((value, colIndex) => (
+                            <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {value}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p>Nessun dato di preview disponibile.</p>
+                )}
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={() => setShowPreviewModal(false)}
+                  className="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                >
+                  Chiudi
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* --- FINE NUOVO JSX DEL MODAL --- */}
         {currentView === 'upload' && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-3xl font-bold text-gray-900 mb-8">Upload Dataset</h2>
-            
+
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition-colors">
                 <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Upload your dataset</h3>
                 <p className="text-gray-500 mb-4">Support for CSV and JSON files up to 100MB</p>
-                
+
                 <input
                   type="file"
                   accept=".csv,.json"
@@ -649,14 +802,14 @@ const loadStats = async () => {
                   className="hidden"
                   id="file-upload"
                 />
-                <label 
+                <label
                   htmlFor="file-upload"
                   className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors"
                 >
                   Choose File
                 </label>
               </div>
-              
+
               {uploadedFile && (
                 <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
                   <div className="flex items-center gap-3">
@@ -669,22 +822,22 @@ const loadStats = async () => {
           </div>
         )}
 
-        
+
         {currentView === 'configure' && dataPreview && (
           <div className="space-y-8">
             <h2 className="text-3xl font-bold text-gray-900">Configure Anonymization</h2>
-            
+
             {/* Column Configuration Table */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Column Configuration</h3>
               <p className="text-sm text-gray-600 mb-6">Select the type for each column in your dataset</p>
-              
+
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-gray-200">
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Column Name</th>
-                      
+
                       <th className="text-center py-3 px-4 font-medium text-gray-900">Quasi-Identifier</th>
                       <th className="text-center py-3 px-4 font-medium text-gray-900">Sensitive</th>
                     </tr>
@@ -695,7 +848,7 @@ const loadStats = async () => {
                         <td className="py-4 px-4">
                           <div className="font-medium text-gray-900">{column}</div>
                         </td>
-                        
+
                         <td className="py-4 px-4 text-center">
                           <input
                             type="checkbox"
@@ -725,7 +878,7 @@ const loadStats = async () => {
                   </tbody>
                 </table>
               </div>
-              
+
               <div className="mt-4 flex gap-4 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 bg-blue-600 rounded"></div>
@@ -741,13 +894,13 @@ const loadStats = async () => {
                 </div>
               </div>
             </div>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <div className="grid grid-cols-1 gap-8">
               {/* Configuration Panel */}
               <div className="space-y-6">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Select Algorithm</h3>
-                  
+
                   <div className="space-y-3">
                     {anonymizationAlgorithms.map((algorithm) => (
                       <label key={algorithm.id} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
@@ -782,12 +935,11 @@ const loadStats = async () => {
                             min={param.min}
                             max={param.max}
                             step={param.step || 1}
-                            defaultValue={param.default}
                             onChange={(e) => handleParamChange(param.name, parseInt(e.target.value))}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         ) : param.type === 'select' ? (
-                          <select 
+                          <select
                             onChange={(e) => handleParamChange(param.name, e.target.value)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -802,7 +954,7 @@ const loadStats = async () => {
                   </div>
                 )}
 
-                <button 
+                <button
                   onClick={handleAnonymize}
                   disabled={!selectedAlgorithm}
                   className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2"
@@ -812,45 +964,6 @@ const loadStats = async () => {
                 </button>
               </div>
 
-              {/* Data Preview */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Preview</h3>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b">
-                        {dataPreview.columns.map((col) => (
-                          <th key={col} className="text-left p-2 font-medium text-gray-900">{col}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.isArray(dataPreview.rows) && dataPreview.rows.length > 0 ? (
-                        dataPreview.rows.slice(0, 5).map((row, idx) => (
-                          <tr key={idx} className="border-b">
-                            {Array.isArray(row)
-                              ? row.map((cell, cellIdx) => (
-                                  <td key={cellIdx} className="p-2 text-gray-600">{cell}</td>
-                                ))
-                              : null}
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={dataPreview.columns.length} className="p-2 text-gray-400 text-center">
-                            No data available
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                
-                <p className="text-sm text-gray-500 mt-2">
-                  Showing 5 of {dataPreview.rows.length} rows
-                </p>
-              </div>
             </div>
           </div>
         )}
@@ -861,42 +974,42 @@ const loadStats = async () => {
         {currentView === 'processing' && (
           <div className="space-y-8">
             <h2 className="text-3xl font-bold text-gray-900">Processing Dataset</h2>
-            
+
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
               <div className="text-center">
                 <div className="animate-spin w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-6"></div>
-                
+
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">
                   {processingMessage}
                 </h3>
-                
+
                 {uploadProgress > 0 && (
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-                    <div 
+                    <div
                       className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                       style={{ width: `${uploadProgress}%` }}
                     ></div>
                   </div>
                 )}
-                
+
                 <p className="text-gray-500 mb-6">
                   Please wait while we process your dataset. This may take a few minutes.
                 </p>
-                
+
                 <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
                   <Clock className="w-4 h-4" />
                   <span>Job ID: {jobId}</span>
                 </div>
-                
+
                 <p className="text-xs text-gray-400 mt-2">
                   We're checking every second for updates...
                 </p>
               </div>
             </div>
-            
+
             {/* Pulsante per annullare o tornare indietro */}
             <div className="flex justify-center">
-              <button 
+              <button
                 onClick={() => {
                   if (pollingInterval) {
                     clearInterval(pollingInterval);
@@ -921,21 +1034,21 @@ const loadStats = async () => {
         {currentView === 'preview' && (
           <div className="space-y-8">
             <h2 className="text-3xl font-bold text-gray-900">Anonymization Results</h2>
-            
+
             {processingStatus === 'processing' && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
                 <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">{processingMessage}</h3>
-                
+
                 {uploadProgress > 0 && (
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-4 max-w-md mx-auto">
-                    <div 
+                    <div
                       className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                       style={{ width: `${uploadProgress}%` }}
                     ></div>
                   </div>
                 )}
-                
+
                 <p className="text-gray-500">Job ID: {jobId}</p>
               </div>
             )}
@@ -951,13 +1064,13 @@ const loadStats = async () => {
                   </div>
                 </div>
                 <div className="mt-4 flex gap-4">
-                  <button 
+                  <button
                     onClick={() => setCurrentView('configure')}
                     className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors"
                   >
                     Try Again
                   </button>
-                  <button 
+                  <button
                     onClick={() => setCurrentView('dashboard')}
                     className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
                   >
@@ -979,56 +1092,14 @@ const loadStats = async () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  {/* Original Data */}
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Original Data</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b">
-                            {dataPreview.columns.map((col) => (
-                              <th key={col} className="text-left p-2 font-medium text-gray-900">{col}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Array.isArray(dataPreview?.rows) && dataPreview.rows.length > 0 ? (
-                            dataPreview.rows.slice(0, 3).map((row, idx) => (
-                              <tr key={idx} className="border-b">
-                                {Array.isArray(row)
-                                  ? row.map((cell, cellIdx) => (
-                                      <td key={cellIdx} className="p-2 text-gray-600">{cell}</td>
-                                    ))
-                                  : null}
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td colSpan={dataPreview?.columns?.length || 1} className="p-2 text-gray-400 text-center">
-                                No data available
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                <div className="grid grid-cols-1  gap-8">
+                  
 
                   {/* Anonymized Data */}
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data</h3>
                     {/* Debug info visibile per aiutare a capire il problema */}
-                    <div className="mb-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-xs">
-                      <strong>Debug:</strong> Found {Array.isArray(anonymizedPreview.rows) ? anonymizedPreview.rows.length : 0} rows in anonymizedPreview.<br />
-                      {/* Mostra anche un estratto dei dati grezzi se disponibili */}
-                      {window.__lastAnonymizedRaw && (
-                        <>
-                          <span>First 2 raw objects: </span>
-                          <pre style={{maxWidth:'100%',overflowX:'auto',display:'inline-block'}}>{JSON.stringify(window.__lastAnonymizedRaw.slice(0,2), null, 2)}</pre>
-                        </>
-                      )}
-                    </div>
+                    
                     {/* Messaggio di errore se la preview è vuota */}
                     {(!Array.isArray(anonymizedPreview.rows) || anonymizedPreview.rows.length === 0) && (
                       <div className="mb-4 p-4 bg-red-100 border border-red-200 rounded text-red-700 flex items-center gap-2">
@@ -1097,12 +1168,11 @@ const loadStats = async () => {
                 </div>
 
                 <div className="flex gap-4 justify-center">
-                  <button 
+                  <button
                     onClick={handleSave}
                     className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2"
                   >
-                    <Download className="w-5 h-5" />
-                    Save & Download
+                    Chiudi
                   </button>
                 </div>
               </div>
