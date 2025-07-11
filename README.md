@@ -1,5 +1,7 @@
 # AnonimaData
 
+![AnonimaData logo](assets/logo.png)
+
 ## Abstract
 
 AnonimaData is a comprehensive data management and analysis toolkit designed to streamline workflows for data scientists, analysts, and developers. The repository provides modular utilities for data ingestion, cleaning, transformation, visualization, and export. With a focus on scalability and ease of use, AnonimaData supports multiple data formats and integrates seamlessly with popular data science libraries. The project aims to foster reproducible research and efficient data-driven decision-making.
@@ -12,7 +14,7 @@ AnonimaData/
 │   ├── anonymizer/         # Implements anonymization algorithms (k-Anonymity, l-Diversity, etc.)
 │   ├── formatter/          # Handles data formatting and preprocessing
 │   ├── orchestratore/      # Orchestrates workflow and service coordination
-├── docs/                   # Project report and ppt
+├── docs/                   # Project report and ppt (italian language)
 ├── frontend/               # React-based web application for user interaction
 ├── stressTests/            # Scripts for stress testing and performance evaluation
 ├── main.tf                 # Terraform configuration for infrastructure setup
@@ -32,10 +34,13 @@ AnonimaData/
 ### Key Features
 
 * **Dataset Upload**: Supports CSV, Excel, JSON, and TXT formats.
-* **Column Configuration: Automatic detection of column types, user selection of Quasi-Identifiers (QI), and columns to anonymize.
-* **Anonymization Methods: k-Anonymity, l-Diversity, Differential Privacy, with configurable parameters.
-* **Job Management: Track status and download anonymized datasets and samples.
-* **Extensibility: Easily add new anonymization algorithms or data processing modules.
+* **Column Configuration**: Automatic detection of column types, user selection of Quasi-Identifiers (QI), and columns to anonymize.
+* **Anonymization Methods**: k-Anonymity, l-Diversity, Differential Privacy, with configurable parameters.
+* **Job Management**: Track status and download anonymized datasets and samples.
+* **Extensibility**: Easily add new anonymization algorithms or data processing modules.
+
+![AnonimaData frontend page](assets/homepage.png)
+*The homepage of the web application*
 
 ### Deployment
 
