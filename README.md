@@ -1,6 +1,7 @@
 # AnonimaData
 
 ![AnonimaData logo](assets/logo.png)
+Exam project by [Pietro Coloretti](https://github.com/PietroColoretti01), [Leonardo Gennaioli](https://github.com/leonardo-gennaioli) and [Iacopo Sbalchiero](https://github.com/IacopoSb) for the course Scalable and Relayable Services in the Computer Engineering Second Cycle Degree @ Unibo, Academic Year 2024-2025.
 
 ## Abstract
 
