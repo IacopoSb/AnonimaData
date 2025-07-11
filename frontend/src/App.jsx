@@ -1098,7 +1098,6 @@ const AnonimaData = () => {
                   {/* Anonymized Data */}
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data</h3>
-                    {/* Debug info visibile per aiutare a capire il problema */}
                     
                     {/* Messaggio di errore se la preview è vuota */}
                     {(!Array.isArray(anonymizedPreview.rows) || anonymizedPreview.rows.length === 0) && (
