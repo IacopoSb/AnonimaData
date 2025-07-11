@@ -309,12 +309,14 @@ def delete_job(job_id):
 
     try:
         bucket = storage_client.bucket(BUCKET_NAME)
-        blobAnonymized = bucket.blob(job['path_file_anonymized'])
-        if blobAnonymized.exists():
-            blobAnonymized.delete()
-        blobAnalyzed = bucket.blob(job['path_file_analyzed'])
-        if blobAnalyzed.exists():
-            blobAnalyzed.delete()
+        if job['path_file_anonymized']:
+            blobAnonymized = bucket.blob(job['path_file_anonymized'])
+            if blobAnonymized.exists():
+                blobAnonymized.delete()
+        if job['path_file_analyzed']:
+            blobAnalyzed = bucket.blob(job['path_file_analyzed'])
+            if blobAnalyzed.exists():
+                blobAnalyzed.delete()
 
         with engine.connect() as conn:
             conn.execute(text('DELETE FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
