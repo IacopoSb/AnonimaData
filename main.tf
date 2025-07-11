@@ -132,25 +132,35 @@ resource "google_service_account" "formatter_service_account" {
   display_name = "AnoniData Formatter Service Account"
 }
 
-# IAM per orchestratore (pubsub, storage, cloudsql)
+# IAM per orchestratore (pubsub, storage, cloudsql, job execution)
 resource "google_project_iam_member" "orchestratore_pubsub_publisher" {
   project = var.project
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
+
 resource "google_project_iam_member" "orchestratore_pubsub_subscriber" {
   project = var.project
   role    = "roles/pubsub.subscriber"
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
+
 resource "google_project_iam_member" "orchestratore_storage" {
   project = var.project
   role    = "roles/storage.objectAdmin"
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
+
 resource "google_project_iam_member" "orchestratore_cloudsql" {
   project = var.project
   role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
+}
+
+# DA RIMUOVERE DA GCR 
+resource "google_project_iam_member" "orchestratore_run_invoker" {
+  project = var.project
+  role    = "roles/run.invoker"
   member  = "serviceAccount:${google_service_account.orchestratore_service_account.email}"
 }
 
@@ -160,6 +170,7 @@ resource "google_project_iam_member" "formatter_pubsub_publisher" {
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.formatter_service_account.email}"
 }
+
 resource "google_project_iam_member" "formatter_pubsub_subscriber" {
   project = var.project
   role    = "roles/pubsub.subscriber"
@@ -172,17 +183,32 @@ resource "google_project_iam_member" "anonymizer_pubsub_publisher" {
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
 }
+
 resource "google_project_iam_member" "anonymizer_pubsub_subscriber" {
   project = var.project
   role    = "roles/pubsub.subscriber"
   member  = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
 }
 
-# IAM per frontend (solo invocazione orchestratore, se serve aggiungi altro)
+# IAM per frontend (solo invocazione orchestratore)
 resource "google_project_iam_member" "frontend_run_invoker" {
   project = var.project
   role    = "roles/run.invoker"
   member  = "serviceAccount:${google_service_account.frontend_service_account.email}"
+}
+
+resource "google_cloud_run_service_iam_member" "formatter_invoker" {
+  service  = google_cloud_run_v2_service.formatter.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.formatter_service_account.email}"
+}
+
+resource "google_cloud_run_service_iam_member" "anonymizer_invoker" {
+  service  = google_cloud_run_v2_service.anonymizer.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.anonymizer_service_account.email}"
 }
 
 # === Pub/Sub Topics e Subscription per orchestrazione servizi ===
@@ -192,9 +218,17 @@ resource "google_pubsub_topic" "formatter_input" {
   name = "formatter-input-topic"
   depends_on = [google_project_service.pubsub]
 }
+
 resource "google_pubsub_subscription" "formatter_input_sub" {
   name  = "formatter-input-sub"
   topic = google_pubsub_topic.formatter_input.name
+
+  push_config {
+    push_endpoint = google_cloud_run_v2_service.formatter.uri
+    oidc_token {
+      service_account_email = google_service_account.formatter_service_account.email
+    }
+  }
 }
 
 # Formatter -> Orchestratore
@@ -202,9 +236,16 @@ resource "google_pubsub_topic" "formatter_output" {
   name = "formatter-output-topic"
   depends_on = [google_project_service.pubsub]
 }
+
 resource "google_pubsub_subscription" "formatter_output_sub" {
   name  = "formatter-output-sub"
   topic = google_pubsub_topic.formatter_output.name
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.orchestratore.uri}/receive_analysis_results"
+    oidc_token {
+      service_account_email = google_service_account.orchestratore_service_account.email
+    }
+  }
 }
 
 # Orchestratore -> Anonymizer
@@ -212,9 +253,17 @@ resource "google_pubsub_topic" "anonymizer_input" {
   name = "anonymizer-input-topic"
   depends_on = [google_project_service.pubsub]
 }
+
 resource "google_pubsub_subscription" "anonymizer_input_sub" {
   name  = "anonymizer-input-sub"
   topic = google_pubsub_topic.anonymizer_input.name
+
+  push_config {
+    push_endpoint = google_cloud_run_v2_service.anonymizer.uri
+    oidc_token {
+      service_account_email = google_service_account.anonymizer_service_account.email
+    }
+  }
 }
 
 # Anonymizer -> Orchestratore
@@ -222,12 +271,37 @@ resource "google_pubsub_topic" "anonymizer_output" {
   name = "anonymizer-output-topic"
   depends_on = [google_project_service.pubsub]
 }
+
 resource "google_pubsub_subscription" "anonymizer_output_sub" {
   name  = "anonymizer-output-sub"
   topic = google_pubsub_topic.anonymizer_output.name
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.orchestratore.uri}/receive_anonymization_results"
+    oidc_token {
+      service_account_email = google_service_account.orchestratore_service_account.email
+    }
+  }
 }
 
-# Cloud Run Servizio Anonymizer (interno, no auth)
+#error topic
+resource "google_pubsub_topic" "error_informations" {
+  name = "error-information-topic"
+  depends_on = [google_project_service.pubsub]
+}
+
+resource "google_pubsub_subscription" "error_informations_sub" {
+  name = "error-information-sub"
+  topic = google_pubsub_topic.error_informations.name
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.orchestratore.uri}/receive_error_notifications"
+    oidc_token {
+      service_account_email = google_service_account.orchestratore_service_account.email
+    }
+  }
+}
+
 resource "google_cloud_run_v2_service" "anonymizer" {
   name     = "anonymizer"
   location = var.region
@@ -240,27 +314,41 @@ resource "google_cloud_run_v2_service" "anonymizer" {
     }
     containers {
       image = "gcr.io/${var.project}/anonymizer:latest"
-      env {
-        name  = "INPUT_SUBSCRIPTION"
-        value = google_pubsub_subscription.anonymizer_input_sub.name
+      ports {
+        container_port = 8080
       }
       env {
-        name  = "OUTPUT_TOPIC"
+        name  = "GOOGLE_CLOUD_PROJECT_ID"
+        value = var.project
+      }
+      env {
+        name  = "ANONYMIZER_OUTPUT_TOPIC"
         value = google_pubsub_topic.anonymizer_output.name
+      }
+      env {
+        name  = "ERROR_INFORMATIONS_TOPIC"
+        value = google_pubsub_topic.error_informations.name
       }
       resources {
         limits = {
-          memory = "512Mi"
+          memory = "1Gi"
           cpu    = "1"
         }
       }
     }
+    timeout = "300s"
+    max_instance_request_concurrency = 1000
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
   depends_on = [google_project_service.run]
 }
 
-# Cloud Run Servizio Formatter (interno, no auth)
 resource "google_cloud_run_v2_service" "formatter" {
   name     = "formatter"
   location = var.region
@@ -273,27 +361,42 @@ resource "google_cloud_run_v2_service" "formatter" {
     }
     containers {
       image = "gcr.io/${var.project}/formatter:latest"
-      env {
-        name  = "INPUT_SUBSCRIPTION"
-        value = google_pubsub_subscription.formatter_input_sub.name
+      ports {
+        container_port = 8080
       }
       env {
-        name  = "OUTPUT_TOPIC"
+        name  = "GOOGLE_CLOUD_PROJECT_ID"
+        value = var.project
+      }
+      env {
+        name  = "FORMATTER_OUTPUT_TOPIC"
         value = google_pubsub_topic.formatter_output.name
+      }
+      env {
+        name  = "ERROR_INFORMATIONS_TOPIC"
+        value = google_pubsub_topic.error_informations.name
       }
       resources {
         limits = {
-          memory = "512Mi"
+          memory = "1Gi"
           cpu    = "1"
         }
       }
     }
+    timeout = "300s"
+    max_instance_request_concurrency = 1000
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
   depends_on = [google_project_service.run]
 }
 
-# Cloud Run Frontend
+# Cloud Run Frontend Service
 resource "google_cloud_run_v2_service" "frontend" {
   name     = "frontend"
   location = var.region
@@ -306,6 +409,9 @@ resource "google_cloud_run_v2_service" "frontend" {
     }
     containers {
       image = "gcr.io/${var.project}/frontend:latest"
+      ports {
+        container_port = 8080
+      }
       env {
         name  = "BACKEND_URL"
         value = google_cloud_run_v2_service.orchestratore.uri
@@ -317,10 +423,20 @@ resource "google_cloud_run_v2_service" "frontend" {
         }
       }
     }
+    timeout = "300s"
+    max_instance_request_concurrency = 1000
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
   }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  depends_on = [google_project_service.run]
 }
 
-# Cloud Run Orchestratore (Backend principale)
+# Cloud Run Orchestratore Service (Backend principale)
 resource "google_cloud_run_v2_service" "orchestratore" {
   name     = "orchestratore"
   location = var.region
@@ -333,6 +449,9 @@ resource "google_cloud_run_v2_service" "orchestratore" {
     }
     containers {
       image = "gcr.io/${var.project}/orchestratore:latest"
+      ports {
+        container_port = 8080
+      }
       env {
         name  = "DB_HOST"
         value = google_sql_database_instance.main_db.private_ip_address
@@ -358,39 +477,40 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         value = google_pubsub_topic.formatter_input.name
       }
       env {
-        name  = "FORMATTER_OUTPUT_SUB"
-        value = google_pubsub_subscription.formatter_output_sub.name
-      }
-      env {
         name  = "ANONYMIZER_INPUT_TOPIC"
         value = google_pubsub_topic.anonymizer_input.name
       }
       env {
-        name  = "ANONYMIZER_OUTPUT_SUB"
-        value = google_pubsub_subscription.anonymizer_output_sub.name
+        name  = "GOOGLE_CLOUD_PROJECT_ID"
+        value = var.project
       }
       env {
-        name  = "FORMATTER_URL"
-        value = google_cloud_run_v2_service.formatter.uri
-      }
-      env {
-        name  = "ANONYMIZER_URL"
-        value = google_cloud_run_v2_service.anonymizer.uri
+        name  = "GOOGLE_CLOUD_REGION"
+        value = var.region
       }
       resources {
         limits = {
-          memory = "512Mi"
+          memory = "1Gi"
           cpu    = "1"
         }
       }
     }
+    timeout = "300s"
+    max_instance_request_concurrency = 1000
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
   }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  depends_on = [google_project_service.run]
 }
 
-
-# Output URLs
+# Output URLs e nomi risorse
 output "frontend_url" {
-  description = "L'URL del frontend (attualmente privato)"
+  description = "L'URL del frontend"
   value       = google_cloud_run_v2_service.frontend.uri
 }
 
@@ -399,30 +519,44 @@ output "orchestratore_url" {
   value       = google_cloud_run_v2_service.orchestratore.uri
 }
 
-output "anonymizer_url" {
-  description = "L'URL del anonymizer (interno)"
-  value       = google_cloud_run_v2_service.anonymizer.uri
-}
-
-output "formatter_url" {
-  description = "L'URL del formatter (interno)"
-  value       = google_cloud_run_v2_service.formatter.uri
-}
-
 output "db_instance_connection_name" {
+  description = "Nome connessione database"
   value = google_sql_database_instance.main_db.connection_name
 }
 
 output "db_private_ip" {
+  description = "IP privato del database"
   value = google_sql_database_instance.main_db.private_ip_address
 }
 
 output "db_user" {
+  description = "Username del database"
   value = google_sql_user.users.name
 }
 
 output "bucket_name" {
+  description = "Nome del bucket per i file CSV"
   value = google_storage_bucket.csv_bucket.name
+}
+
+output "formatter_input_topic" {
+  description = "Nome del topic input per il formatter"
+  value = google_pubsub_topic.formatter_input.name
+}
+
+output "formatter_output_topic" {
+  description = "Nome del topic output per il formatter"
+  value = google_pubsub_topic.formatter_output.name
+}
+
+output "anonymizer_input_topic" {
+  description = "Nome del topic input per l'anonymizer"
+  value = google_pubsub_topic.anonymizer_input.name
+}
+
+output "anonymizer_output_topic" {
+  description = "Nome del topic output per l'anonymizer"
+  value = google_pubsub_topic.anonymizer_output.name
 }
 
 # Dashboard di monitoraggio
@@ -432,13 +566,14 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
     mosaicLayout = {
       columns = 12
       tiles = [
+        # Richieste Cloud Run
         {
           width  = 6
           height = 4
           xPos   = 0
           yPos   = 0
           widget = {
-            title = "Cloud Run Requests"
+            title = "Cloud Run Services - Requests"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
@@ -459,13 +594,14 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
             }
           }
         },
+        # Latenza Cloud Run
         {
           width  = 6
           height = 4
           xPos   = 6
           yPos   = 0
           widget = {
-            title = "Cloud Run Latency"
+            title = "Cloud Run Services - Latency (95th percentile)"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
@@ -481,6 +617,146 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
               }]
               yAxis = {
                 label = "Latency (ms)"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Istanze attive Cloud Run
+        {
+          width  = 6
+          height = 4
+          xPos   = 0
+          yPos   = 4
+          widget = {
+            title = "Cloud Run - Active Instances"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/container/instance_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_MEAN"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Instances"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi inviati (tutti i topic)
+        {
+          width  = 6
+          height = 4
+          xPos   = 6
+          yPos   = 4
+          widget = {
+            title = "Pub/Sub Messages Sent (All Topics)"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_RATE"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Messages/sec"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi ricevuti (tutte le subscription)
+        {
+          width  = 6
+          height = 4
+          xPos   = 0
+          yPos   = 8
+          widget = {
+            title = "Pub/Sub Messages Pulled (All Subscriptions)"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "metric.type=\"pubsub.googleapis.com/subscription/pull_message_operation_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_RATE"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Pulled/sec"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi per singolo topic (formatter input)
+        {
+          width  = 6
+          height = 4
+          xPos   = 6
+          yPos   = 8
+          widget = {
+            title = "Formatter Input Topic - Messages Sent"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "resource.label.\"topic_id\"=\"${google_pubsub_topic.formatter_input.name}\" AND metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_RATE"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Messages/sec"
+                scale = "LINEAR"
+              }
+            }
+          }
+        },
+        # Pub/Sub messaggi per singolo topic (anonymizer input)
+        {
+          width  = 6
+          height = 4
+          xPos   = 0
+          yPos   = 12
+          widget = {
+            title = "Anonymizer Input Topic - Messages Sent"
+            xyChart = {
+              dataSets = [{
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "resource.label.\"topic_id\"=\"${google_pubsub_topic.anonymizer_input.name}\" AND metric.type=\"pubsub.googleapis.com/topic/send_message_operation_count\""
+                    aggregation = {
+                      perSeriesAligner = "ALIGN_RATE"
+                      alignmentPeriod = "60s"
+                    }
+                  }
+                }
+                plotType = "LINE"
+              }]
+              yAxis = {
+                label = "Messages/sec"
                 scale = "LINEAR"
               }
             }
