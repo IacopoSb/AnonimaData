@@ -36,3 +36,6 @@ override.tf.json
 .terraformrc
 terraform.rc
 frontend/bun.lock
+
+# Ignore tfvars files containing secrets or environment-specific configuration
+terraform.tfvars

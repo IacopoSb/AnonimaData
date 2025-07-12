@@ -1,3 +1,5 @@
+# WARNING: Check under Windows that this file has been saved with LF line endings.
+
 #!/bin/sh
 set -e
 if [ -n "$BACKEND_URL" ]; then
