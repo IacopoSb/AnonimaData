@@ -327,32 +327,8 @@ const AnonimaData = () => {
             setCurrentView={setCurrentView}
             loadStats={loadStats}
             handleDownload={handleDownload}
-            handlePreview={(jobId) => {
-              const datasetToPreview = datasets.find(d => d.id === jobId);
-              if (datasetToPreview && datasetToPreview.anonymizedPreview) {
-                 // Convert to expected format for modal
-                const columns = datasetToPreview.anonymizedPreview.length > 0 ? Object.keys(datasetToPreview.anonymizedPreview[0]) : [];
-                const previewRows = objectsToRows(datasetToPreview.anonymizedPreview, columns).map(row => {
-                  const obj = {};
-                  columns.forEach((col, idx) => {
-                    obj[col] = row[idx];
-                  });
-                  return obj;
-                });
-                setCurrentPreviewData(previewRows);
-                setCurrentPreviewFilename(datasetToPreview.name);
-                setShowPreviewModal(true);
-              } else {
-                console.warn(`Preview data not found for job_id: ${jobId}`);
-                setCurrentPreviewData([]);
-                setCurrentPreviewFilename(datasetToPreview?.name || 'Unknown File');
-                setShowPreviewModal(true);
-              }
-            }}
             handleDelete={handleDelete}
-            setShowPreviewModal={setShowPreviewModal}
-            setCurrentPreviewData={setCurrentPreviewData}
-            setCurrentPreviewFilename={setCurrentPreviewFilename}
+            openJob={startPolling}
           />
         )}
 
@@ -389,6 +365,7 @@ const AnonimaData = () => {
         )}
 
         {currentView === 'preview' && (
+
           <PreviewResults
             processingStatus={processingStatus}
             processingMessage={processingMessage}

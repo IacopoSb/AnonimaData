@@ -7,8 +7,8 @@ const AuthView = ({ handleLogin, authError, firebaseLoaded }) => {
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
       <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 w-full max-w-md border border-white/20">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full mb-4">
-            <Lock className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-32 h-32 rounded-full mb-8">
+            <img src="/logo_dark.png" alt="AnonimaData Logo" />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">AnonimaData</h1>
           <p className="text-gray-300">Secure Dataset Anonymization Platform</p>
@@ -33,9 +33,6 @@ const AuthView = ({ handleLogin, authError, firebaseLoaded }) => {
         </button>
 
         <div className="mt-6 text-center">
-          <p className="text-gray-400 text-sm">
-            Secure authentication powered by Firebase
-          </p>
         </div>
       </div>
     </div>

@@ -64,12 +64,12 @@ const PreviewResults = ({
 
           <div className="grid grid-cols-1 gap-8">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data Preview (first 3 rows)</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data Preview</h3>
 
               {(!Array.isArray(anonymizedPreview.rows) || anonymizedPreview.rows.length === 0) && (
                 <div className="mb-4 p-4 bg-red-100 border border-red-200 rounded text-red-700 flex items-center gap-2">
                   <AlertCircle className="w-5 h-5 text-red-500" />
-                  <span>No anonymized data found in the backend response. Please check the backend or contact support.</span>
+                  <span>No anonymized data found in the response. Please contact support.</span>
                 </div>
               )}
               <div className="overflow-x-auto">
@@ -83,7 +83,7 @@ const PreviewResults = ({
                   </thead>
                   <tbody>
                     {Array.isArray(anonymizedPreview.rows) && anonymizedPreview.rows.length > 0 ? (
-                      anonymizedPreview.rows.slice(0, 3).map((row, idx) => (
+                      anonymizedPreview.rows.slice(0, 9).map((row, idx) => (
                         <tr key={idx} className="border-b">
                           {anonymizedPreview.columns.map((col, cellIdx) => (
                             <td key={cellIdx} className="p-2 text-blue-600 font-medium">
