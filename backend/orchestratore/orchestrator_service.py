@@ -50,7 +50,8 @@ def init_db():
                 path_file_anonymized TEXT,
                 upload_at TEXT,
                 completed_at TEXT,
-                status TEXT
+                status TEXT,
+                error_message TEXT,
             )
         '''))
         conn.commit()
@@ -128,7 +129,8 @@ def upload_and_analyze():
                 "path_file_anonymized": None,
                 "upload_at": upload_at,
                 "completed_at": None,
-                "status": 'uploaded'
+                "status": 'uploaded',
+                "error_message": None
             })
             conn.commit()
 
@@ -224,7 +226,8 @@ def get_status(job_id):
         "rows": job['rows'],
         "method": job['method'],
         "metadata": json.loads(job['metadata']) if job['metadata'] else None,        
-        "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None
+        "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None,
+        "error_message": job['error_message'] if job['error_message'] else None
     }
     return jsonify(response_status), 200
 
@@ -480,8 +483,8 @@ def receive_error_notifications():
             job = result.mappings().first()
             
             if job:
-                conn.execute(text('UPDATE jobs SET status = :status, completed_at = :completed_at WHERE job_id = :job_id'), 
-                           {"status": 'error', "completed_at": datetime.now().isoformat(), "job_id": job_id})
+                conn.execute(text('UPDATE jobs SET status = :status, completed_at = :completed_at, error_message = :error_message WHERE job_id = :job_id'), 
+                           {"status": 'error', "completed_at": datetime.now().isoformat(), "error_message":error_message, "job_id": job_id})
                 conn.commit()
                 logger.error(f"Error notification received for job {job_id} in stage {stage}: {error_message}")
                 return jsonify({"message": "Error notification received successfully"}), 200

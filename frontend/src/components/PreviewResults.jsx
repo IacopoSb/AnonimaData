@@ -9,7 +9,8 @@ const PreviewResults = ({
   jobId,
   handleDownload,
   handleSave,
-  setCurrentView
+  setCurrentView,
+  fileName
 }) => {
   return (
     <div className="space-y-8">
@@ -65,7 +66,7 @@ const PreviewResults = ({
           )}
           <div className="grid grid-cols-1 gap-8">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data Preview</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data Preview for {fileName}</h3>
 
               {(!Array.isArray(anonymizedPreview.rows) || anonymizedPreview.rows.length === 0) && (
                 <div className="mb-4 p-4 bg-red-100 border border-red-200 rounded text-red-700 flex items-center gap-2">
@@ -108,7 +109,7 @@ const PreviewResults = ({
 
           <div className="flex gap-4 justify-center">
             <button
-              onClick={() => handleDownload(jobId, 'anonymized_data')}
+              onClick={() => handleDownload(jobId, fileName)}
               className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2"
             >
               Download Anonymized Data

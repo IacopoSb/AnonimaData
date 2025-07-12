@@ -31,15 +31,17 @@ const AnonimaData = () => {
   });
   const [jobId, setJobId] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [processingMessage, setProcessingMessage] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [currentPreviewFilename, setCurrentPreviewFilename] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [statsError, setStatsError] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Load dashboard statistics and datasets
   const loadStats = useCallback(async () => {
     setIsRefreshing(true);
+    setStatsError(false);
     try {
       const consolidatedData = await getFiles();
       setStats({
@@ -83,6 +85,7 @@ const AnonimaData = () => {
       }
     } catch (error) {
       console.error('Error loading statistics:', error);
+      setStatsError(true);
       setStats({ totalDatasets: 0, completedJobs: 0, dataProtected: 0 });
       setDatasets([]);
     }
@@ -107,11 +110,11 @@ const AnonimaData = () => {
     const interval = setInterval(async () => {
       try {
         const response = await checkJobStatus(jobId);
+        setErrorMessage(null);
+        setCurrentPreviewFilename(null);
         if (response.status === 'analyzed') {
           setProcessingStatus('completed');
           setProcessingMessage('Analysis completed successfully!');
-          setUploadProgress(100);
-
           const columns = response.processed_data_info?.columns || response.columns || [];
           const rows = objectsToRows(response.processed_data_preview || response.sample || [], columns);
           setDataPreview({ columns, rows });
@@ -121,11 +124,11 @@ const AnonimaData = () => {
         } else if (response.status === 'anonymized' || response.status === 'completed') {
           setProcessingStatus('completed');
           setProcessingMessage('Anonymization completed successfully!');
-          setUploadProgress(100);
           const columns = response.columns || [];
           const anonymizedData = response.anonymized_preview || [];
           const rows = objectsToRows(anonymizedData, columns);
           setAnonymizedPreview({ columns, rows });
+          setCurrentPreviewFilename(response.fileName);
           clearInterval(interval);
           setPollingInterval(null);
           loadStats();
@@ -133,6 +136,7 @@ const AnonimaData = () => {
         } else if (response.status === 'error') {
           setProcessingStatus('error');
           setProcessingMessage(response.details || 'An error occurred during processing');
+          setErrorMessage(response.error_message || 'An error occurred');
           clearInterval(interval);
           setPollingInterval(null);
         } else {
@@ -174,11 +178,18 @@ const AnonimaData = () => {
   }, [currentView, pollingInterval]);
 
   // Handle file upload
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
+const handleFileUpload = async (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    const validTypes = ['text/csv', 'application/json'];
+    const validExtensions = ['.csv', '.json'];
+    const fileType = file.type;
+    const fileName = file.name.toLowerCase();
+    const hasValidType = validTypes.includes(fileType);
+    const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+
+    if (hasValidType || hasValidExtension) {
       setUploadedFile(file);
-      setUploadProgress(0);
 
       const formData = new FormData();
       formData.append('file', file);
@@ -198,7 +209,8 @@ const AnonimaData = () => {
         setCurrentView('upload');
       }
     }
-  };
+  }
+};
 
   // Handle algorithm parameter change
   const handleParamChange = (paramName, value) => {
@@ -252,7 +264,7 @@ const AnonimaData = () => {
       const url = window.URL.createObjectURL(fileBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `anonymized_${fileName}.csv`;
+      a.download = `anonymized_${fileName}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -271,7 +283,7 @@ const AnonimaData = () => {
   };
 
   // Delete dataset
-  const handleDelete = async (jobId, filename) => {
+  const handleDelete = async (jobId) => {
     try {
       await deleteFile(jobId);
       await loadStats();
@@ -325,6 +337,14 @@ const AnonimaData = () => {
         loadStats={loadStats}
       />
 
+      {/* Show error if present */}
+      {statsError && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative m-4 max-w-7xl mx-auto">
+          <strong className="font-bold">Error:</strong>
+          <span className="block sm:inline ml-2">failed to contact the server. Retry in a few minutes.</span>
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {currentView === 'dashboard' && (
@@ -364,7 +384,7 @@ const AnonimaData = () => {
         {currentView === 'processing' && (
           <ProcessingView
             processingMessage={processingMessage}
-            uploadProgress={uploadProgress}
+            errorMessage={errorMessage}
             jobId={jobId}
             pollingInterval={pollingInterval}
             setPollingInterval={setPollingInterval}
@@ -383,6 +403,7 @@ const AnonimaData = () => {
             handleDownload={handleDownload}
             handleSave={handleSave}
             setCurrentView={setCurrentView}
+            fileName={currentPreviewFilename}
           />
         )}
 

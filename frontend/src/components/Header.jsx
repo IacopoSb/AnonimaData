@@ -16,6 +16,7 @@ const Header = ({ user, handleLogout, setCurrentView, currentView, loadStats  })
           <nav className="hidden md:flex space-x-8">
             <button
               onClick={() => {
+                console.log('user', user);
                 setCurrentView('dashboard');
                 if (loadStats) {
                   loadStats();
@@ -39,6 +40,7 @@ const Header = ({ user, handleLogout, setCurrentView, currentView, loadStats  })
               alt={user.name}
               className="w-8 h-8 rounded-full"
               onError={(e) => {
+                console.error('Error loading user avatar:', e);
                 e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=6366f1&color=fff`;
               }}
             />

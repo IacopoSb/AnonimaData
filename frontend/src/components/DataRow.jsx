@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Eye, Clock, Trash, FormInputIcon, CheckCircle } from 'lucide-react';
+import { Download, Eye, Clock, Trash, FormInputIcon, CheckCircle, AlertCircle } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 
 // Skeleton loader for loading state
@@ -46,13 +46,22 @@ const DataRow = ({
             {dataset.created && dataset.created !== 'N/A' ? dataset.created : <Skeleton width="w-24" />}
         </td>
 
-        {/* Status - always shown */}
-        <td className="px-6 py-4 whitespace-nowrap">
+        {/* Status - only shown if not error */}
+        {dataset.status !== 'error' ? (
+          <td className="px-6 py-4 whitespace-nowrap">
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                <Clock className="w-3 h-3 mr-1" />
-                {dataset.status === 'analyzed' ? 'Waiting for input' : 'Processing'}
+              <Clock className="w-3 h-3 mr-1" />
+              {dataset.status === 'analyzed' ? 'Waiting for input' : 'Processing'}
             </span>
-        </td>
+          </td>
+        ) : (
+          <td className="px-6 py-4 whitespace-nowrap">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+              <AlertCircle className="w-3 h-3 mr-1" />
+              Error
+            </span>
+          </td>
+        )}
 
         {/* Actions - skeleton to indicate not yet available */}
         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">

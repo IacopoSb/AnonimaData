@@ -60,7 +60,8 @@ export const checkJobStatus = async (jobId) => {
           job_id: jobId,
           columns: column,
           anonymized_preview: analysisData.anonymized_preview,
-          metadata: analysisData.metadata
+          metadata: analysisData.metadata,
+          fileName: analysisData.filename
         };
       }
       // If analysis is still in progress
@@ -68,7 +69,8 @@ export const checkJobStatus = async (jobId) => {
         status: analysisData.status,
         job_id: jobId,
         progress: analysisData.progress,
-        details: analysisData.details
+        details: analysisData.details,
+        error_message: analysisData.error_message || null
       };
     }
   } catch (error) {
