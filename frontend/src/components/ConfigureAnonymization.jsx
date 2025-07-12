@@ -1,4 +1,3 @@
-// ConfigureAnonymization.jsx
 import React from 'react';
 import { Settings } from 'lucide-react';
 import { anonymizationAlgorithms } from '../constants/anonymizationConfig'; // Import algorithms

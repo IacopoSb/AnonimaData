@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Download, Eye, Clock, Trash, FormInputIcon, CheckCircle } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 
-// Utility: Skeleton loader for loading state
+// Skeleton loader for loading state
 function Skeleton({ width = "w-20", height = "h-4" }) {
   return (
     <span className={`inline-block bg-gray-200 rounded ${width} ${height} animate-pulse`} />
@@ -17,16 +17,16 @@ const DataRow = ({
 }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Status non completato - mostra skeleton loader
+  // If status is not completed, show skeleton loader
   if (dataset.status !== 'anonymized') {
     return (
       <tr className="hover:bg-gray-50 opacity-80">
-        {/* Nome dataset sempre visibile */}
+        {/* Dataset name always visible */}
         <td className="px-6 py-4 whitespace-nowrap">
           <div className="font-medium text-gray-900">{dataset.name}</div>
         </td>
         
-        {/* Algoritmo - skeleton o vuoto se non disponibile */}
+        {/* Algorithm - skeleton or empty if not available */}
         <td className="px-6 py-4 whitespace-nowrap">
           {dataset.algorithm && dataset.algorithm !== 'Unknown' ? (
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -37,7 +37,7 @@ const DataRow = ({
           )}
         </td>
         
-        {/* Righe - skeleton o valore se disponibile */}
+        {/* Rows - skeleton or value if available */}
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
           {dataset.rows ? dataset.rows.toLocaleString() : <Skeleton width="w-12" />}
         </td>
@@ -46,7 +46,7 @@ const DataRow = ({
             {dataset.created && dataset.created !== 'N/A' ? dataset.created : <Skeleton width="w-24" />}
         </td>
 
-        {/* Status - sempre mostrato */}
+        {/* Status - always shown */}
         <td className="px-6 py-4 whitespace-nowrap">
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                 <Clock className="w-3 h-3 mr-1" />
@@ -54,7 +54,7 @@ const DataRow = ({
             </span>
         </td>
 
-        {/* Azioni - skeleton per indicare che non sono ancora disponibili */}
+        {/* Actions - skeleton to indicate not yet available */}
         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
           <div className="flex items-center gap-4">
             {dataset.status === 'analyzed' ? (
@@ -87,7 +87,7 @@ const DataRow = ({
     );
   }
 
-  // Status completato - mostra tutti i dati
+  // If status is completed, show all data
   return (
     <tr className="hover:bg-gray-50">
       <td className="px-6 py-4 whitespace-nowrap">

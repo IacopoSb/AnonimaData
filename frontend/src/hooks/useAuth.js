@@ -1,7 +1,6 @@
-// src/hooks/useAuth.js
 import { useState, useEffect } from 'react';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import '../services/firebase'; // Assumes Firebase is initialized here
+import '../services/firebase'; // Firebase is initialized here
 import { getAuthErrorMessage } from '../utils/authErrors'; // Import utility for error messages
 
 const useAuth = () => {

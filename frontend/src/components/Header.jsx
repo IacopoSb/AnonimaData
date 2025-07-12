@@ -1,4 +1,3 @@
-// Header.jsx
 import React from 'react';
 import { LogOut, Lock } from 'lucide-react';
 

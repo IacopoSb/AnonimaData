@@ -1,4 +1,3 @@
-// src/utils/authErrors.js
 export const getAuthErrorMessage = (errorCode) => {
   switch (errorCode) {
     case 'auth/popup-closed-by-user':

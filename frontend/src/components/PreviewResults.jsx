@@ -1,4 +1,3 @@
-// PreviewResults.jsx
 import React from 'react';
 import { CheckCircle, AlertCircle, InfoIcon } from 'lucide-react';
 

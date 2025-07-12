@@ -1,4 +1,3 @@
-// UploadData.jsx
 import React from 'react';
 import { Upload, CheckCircle } from 'lucide-react';
 

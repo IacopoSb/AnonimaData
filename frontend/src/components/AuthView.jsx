@@ -1,4 +1,3 @@
-// AuthView.jsx
 import React from 'react';
 import { Lock, User, AlertCircle } from 'lucide-react';
 

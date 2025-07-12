@@ -1,17 +1,17 @@
-// App.jsx (Updated Main Component)
+// App.jsx (Main Component)
 import React, { useState, useEffect, useCallback } from 'react';
 import { LogOut, Lock, User } from 'lucide-react';
-import useAuth from './hooks/useAuth'; // auth hook
-import { uploadFile, getFiles, anonymizeData, downloadFile, checkJobStatus, deleteFile } from './services/api'; // API service
-import { objectsToRows } from './utils/dataTransformers'; // Utility function
+import useAuth from './hooks/useAuth';
+import { uploadFile, getFiles, anonymizeData, downloadFile, checkJobStatus, deleteFile } from './services/api';
+import { objectsToRows } from './utils/dataTransformers';
 import Dashboard from './components/Dashboard';
 import UploadData from './components/UploadData';
 import ConfigureAnonymization from './components/ConfigureAnonymization';
 import ProcessingView from './components/ProcessingView';
 import PreviewResults from './components/PreviewResults';
-import DeleteModal from './components/DeleteModal'; //  modal component
-import Header from './components/Header'; //  Header component
-import AuthView from './components/AuthView'; //  AuthView component
+import DeleteModal from './components/DeleteModal';
+import Header from './components/Header';
+import AuthView from './components/AuthView';
 
 const AnonimaData = () => {
   const { user, loading, authError, firebaseLoaded, handleLogin, handleLogout } = useAuth();
@@ -37,6 +37,7 @@ const AnonimaData = () => {
   const [currentPreviewFilename, setCurrentPreviewFilename] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Load dashboard statistics and datasets
   const loadStats = useCallback(async () => {
     setIsRefreshing(true);
     try {
@@ -81,7 +82,7 @@ const AnonimaData = () => {
         setDatasets([]);
       }
     } catch (error) {
-      console.error('Errore nel caricamento delle statistiche:', error);
+      console.error('Error loading statistics:', error);
       setStats({ totalDatasets: 0, completedJobs: 0, dataProtected: 0 });
       setDatasets([]);
     }
@@ -97,6 +98,7 @@ const AnonimaData = () => {
     }
   }, [user, loadStats]);
 
+  // Poll job status for processing and anonymization
   const startPolling = useCallback((jobId) => {
     setJobId(jobId);
     setProcessingStatus('processing');
@@ -126,8 +128,8 @@ const AnonimaData = () => {
           setAnonymizedPreview({ columns, rows });
           clearInterval(interval);
           setPollingInterval(null);
-          loadStats(); // Reload stats to update dashboard with new anonymized dataset
-          setCurrentView('preview'); // Ensure we are on preview view after anonymization
+          loadStats();
+          setCurrentView('preview');
         } else if (response.status === 'error') {
           setProcessingStatus('error');
           setProcessingMessage(response.details || 'An error occurred during processing');
@@ -153,6 +155,7 @@ const AnonimaData = () => {
     };
   }, [pollingInterval]);
 
+  // Reset state when switching to upload view
   useEffect(() => {
     if (currentView === 'upload') {
       setUploadedFile(null);
@@ -170,7 +173,7 @@ const AnonimaData = () => {
     }
   }, [currentView, pollingInterval]);
 
-
+  // Handle file upload
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (file && (file.type === 'text/csv' || file.type === 'application/json')) {
@@ -189,25 +192,28 @@ const AnonimaData = () => {
           throw new Error('No job_id returned from server');
         }
       } catch (error) {
-        console.error('Errore durante l\'upload del file:', error);
+        console.error('Error uploading file:', error);
         setProcessingStatus('error');
         setProcessingMessage('Failed to upload file. Please try again.');
-        setCurrentView('upload'); // Stay on upload view with error
+        setCurrentView('upload');
       }
     }
   };
 
+  // Handle algorithm parameter change
   const handleParamChange = (paramName, value) => {
     setAlgorithmParams(prev => ({ ...prev, [paramName]: value }));
   };
 
+  // Handle column configuration change
   const handleColumnConfig = (column, type) => {
     setColumnConfig(prev => ({ ...prev, [column]: type }));
   };
 
+  // Start anonymization process
   const handleAnonymize = async () => {
     setProcessingStatus('processing');
-    setCurrentView('processing'); // Move to processing view to show processing status
+    setCurrentView('processing');
     setProcessingMessage('Starting anonymization process...');
 
     try {
@@ -233,51 +239,53 @@ const AnonimaData = () => {
         throw new Error('No job_id returned from anonymization request');
       }
     } catch (error) {
-      console.error('Errore anonimizzazione:', error);
+      console.error('Error during anonymization:', error);
       setProcessingStatus('error');
       setProcessingMessage('Anonymization failed. Please try again.');
     }
   };
 
+  // Download anonymized file
   const handleDownload = async (jobId, fileName) => {
     try {
       const fileBlob = await downloadFile(jobId);
       const url = window.URL.createObjectURL(fileBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `anonymized_${fileName}.csv`; // Ensure .csv extension
+      a.download = `anonymized_${fileName}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Errore nel download:', error);
+      console.error('Error downloading file:', error);
       alert('Failed to download file. Please try again.');
     }
   };
 
-const handleDeleteRequest = async (jobId, filename) => {
+  // Show delete confirmation modal
+  const handleDeleteRequest = async (jobId, filename) => {
     setCurrentPreviewFilename(filename);
     setJobId(jobId);
     setShowDeleteModal(true);
-}
-
-  const handleDelete = async (jobId, filename) => {
-      try {
-        await deleteFile(jobId);
-        await loadStats();
-      } catch (error) {
-        console.error('Errore durante l\'eliminazione del file:', error);
-        alert('Failed to delete file. Please try again.');
-      }
-    
-
   };
 
+  // Delete dataset
+  const handleDelete = async (jobId, filename) => {
+    try {
+      await deleteFile(jobId);
+      await loadStats();
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      alert('Failed to delete file. Please try again.');
+    }
+  };
+
+  // Save and return to dashboard
   const handleSave = () => {
     setCurrentView('dashboard');
-    setAnonymizedPreview(null); // Clear preview once done
-    setUploadedFile(null); // Clear uploaded file context
+    setAnonymizedPreview(null);
+    setUploadedFile(null);
     setSelectedAlgorithm('');
     setAlgorithmParams({});
     setColumnConfig({});
@@ -366,7 +374,6 @@ const handleDeleteRequest = async (jobId, filename) => {
         )}
 
         {currentView === 'preview' && (
-
           <PreviewResults
             processingStatus={processingStatus}
             processingMessage={processingMessage}

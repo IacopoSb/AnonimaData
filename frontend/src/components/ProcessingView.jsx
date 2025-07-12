@@ -1,4 +1,3 @@
-// ProcessingView.jsx
 import React from 'react';
 import { InfoIcon } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
@@ -10,7 +9,7 @@ const ProcessingView = ({
   pollingInterval,
   setPollingInterval,
   setCurrentView,
-  setProcessingStatus // Added to reset status
+  setProcessingStatus 
 }) => {
   const handleCancel = () => {
     if (pollingInterval) {

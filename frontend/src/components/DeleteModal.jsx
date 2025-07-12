@@ -7,7 +7,6 @@ const DeleteModal = ({ show, onClose, filename, jobId, onDelete }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md text-black transform transition-all duration-300 scale-100 animate-in fade-in zoom-in">
-        {/* Animated Warning Icon */}
         <div className="flex justify-center mb-6">
           <div className="relative">
             <AlertTriangle className="w-16 h-16 text-red-500" />
