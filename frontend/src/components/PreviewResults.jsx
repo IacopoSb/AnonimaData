@@ -52,6 +52,8 @@ const PreviewResults = ({
 
       {processingStatus === 'completed' && anonymizedPreview && (
         <div className="space-y-6">
+          { /* Algorithm is not null only if the view is rendered from the processing view, if so show the succeded banner */ }
+          { selectedAlgorithm && (
           <div className="bg-green-50 border border-green-200 rounded-xl p-6">
             <div className="flex items-center gap-3">
               <CheckCircle className="w-8 h-8 text-green-600" />
@@ -61,7 +63,7 @@ const PreviewResults = ({
               </div>
             </div>
           </div>
-
+          )}
           <div className="grid grid-cols-1 gap-8">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Anonymized Data Preview</h3>
@@ -107,7 +109,7 @@ const PreviewResults = ({
 
           <div className="flex gap-4 justify-center">
             <button
-              onClick={() => handleDownload(jobId, 'anonymized_data')} // Pass a generic name if original file name is not available here
+              onClick={() => handleDownload(jobId, 'anonymized_data')}
               className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2"
             >
               Download Anonymized Data
