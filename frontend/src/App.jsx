@@ -9,7 +9,7 @@ import UploadData from './components/UploadData';
 import ConfigureAnonymization from './components/ConfigureAnonymization';
 import ProcessingView from './components/ProcessingView';
 import PreviewResults from './components/PreviewResults';
-import PreviewModal from './components/PreviewModal'; //  modal component
+import DeleteModal from './components/DeleteModal'; //  modal component
 import Header from './components/Header'; //  Header component
 import AuthView from './components/AuthView'; //  AuthView component
 
@@ -33,8 +33,7 @@ const AnonimaData = () => {
   const [pollingInterval, setPollingInterval] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingMessage, setProcessingMessage] = useState('');
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [currentPreviewData, setCurrentPreviewData] = useState([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [currentPreviewFilename, setCurrentPreviewFilename] = useState('');
 
   const loadStats = useCallback(async () => {
@@ -254,22 +253,22 @@ const AnonimaData = () => {
     }
   };
 
+const handleDeleteRequest = async (jobId, filename) => {
+    setCurrentPreviewFilename(filename);
+    setJobId(jobId);
+    setShowDeleteModal(true);
+}
+
   const handleDelete = async (jobId, filename) => {
-    if (window.confirm(`Sei sicuro di voler eliminare il dataset "${filename}"? Questa operazione è irreversibile.`)) {
       try {
-        setProcessingStatus('deleting');
-        setProcessingMessage(`Deleting "${filename}"...`);
         await deleteFile(jobId);
-        setProcessingStatus('idle');
-        setProcessingMessage(`Dataset "${filename}" deleted successfully!`);
         await loadStats();
       } catch (error) {
         console.error('Errore durante l\'eliminazione del file:', error);
-        setProcessingStatus('error');
-        setProcessingMessage(`Error deleting "${filename}": ${error.message}`);
-        setTimeout(() => setProcessingMessage(''), 5000);
+        alert('Failed to delete file. Please try again.');
       }
-    }
+    
+
   };
 
   const handleSave = () => {
@@ -327,7 +326,7 @@ const AnonimaData = () => {
             setCurrentView={setCurrentView}
             loadStats={loadStats}
             handleDownload={handleDownload}
-            handleDelete={handleDelete}
+            handleDelete={handleDeleteRequest}
             openJob={startPolling}
             getFiles={getFiles}
           />
@@ -379,11 +378,12 @@ const AnonimaData = () => {
           />
         )}
 
-        <PreviewModal
-          show={showPreviewModal}
-          onClose={() => setShowPreviewModal(false)}
+        <DeleteModal
+          show={showDeleteModal}
+          onClose={() => setShowDeleteModal(false)}
           filename={currentPreviewFilename}
-          data={currentPreviewData}
+          jobId={jobId}
+          onDelete={handleDelete}
         />
       </main>
     </div>
