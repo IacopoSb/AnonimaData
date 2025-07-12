@@ -329,6 +329,7 @@ const AnonimaData = () => {
             handleDownload={handleDownload}
             handleDelete={handleDelete}
             openJob={startPolling}
+            getFiles={getFiles}
           />
         )}
 

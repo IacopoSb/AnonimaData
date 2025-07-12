@@ -1,8 +1,8 @@
 // Dashboard.jsx
-import React from 'react';
-import { Upload, Database, FileText, Lock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Upload, Database, FileText, Lock, RefreshCcw } from 'lucide-react';
 import DataRow from './DataRow'; 
-import { objectsToRows } from '../utils/dataTransformers';
+import LoadingSpinner from './LoadingSpinner';
 
 const Dashboard = ({
   datasets,
@@ -12,20 +12,22 @@ const Dashboard = ({
   handleDownload,
   handlePreview,
   handleDelete,
-  openJob
+  openJob,
+  isLoading
 }) => {
-
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
-        <button
-          onClick={() => setCurrentView('upload')}
-          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
-        >
-          <Upload className="w-5 h-5" />
-          Upload New Dataset
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setCurrentView('upload')}
+            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+          >
+            <Upload className="w-5 h-5" />
+            Upload New Dataset
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -53,8 +55,9 @@ const Dashboard = ({
 
       {/* Datasets Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Your Anonymized Datasets</h3>
+          {isLoading ? (<LoadingSpinner />) : null}
         </div>
 
         {datasets.length === 0 ? (

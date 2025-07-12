@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Download, Eye, Clock, Trash, FormInputIcon, CheckCircle } from 'lucide-react';
+import LoadingSpinner from './LoadingSpinner';
 
 // Utility: Skeleton loader for loading state
 function Skeleton({ width = "w-20", height = "h-4" }) {
@@ -14,6 +15,8 @@ const DataRow = ({
   handlePreview, 
   handleDelete 
 }) => {
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   // Status non completato - mostra skeleton loader
   if (dataset.status !== 'anonymized') {
     return (
@@ -55,14 +58,21 @@ const DataRow = ({
         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
           <div className="flex items-center gap-4">
             {dataset.status === 'analyzed' ? (
-                  <button 
+                <button 
                     className="text-green-600 hover:text-green-900"
-                    onClick={() => handlePreview(dataset.id)}
+                    disabled={previewLoading}
+                    onClick={async () => {
+                    setPreviewLoading(true);
+                    handlePreview(dataset.id);
+                    }}
                     title="Set Parameters"
-                    >
-                    {/* You can use any icon, here reusing CheckCircle for demo */}
+                >
+                    {previewLoading ? (
+                    <LoadingSpinner size={16}/>
+                    ) : (
                     <FormInputIcon className="w-4 h-4" />
-                    </button>
+                    )}
+                </button>
               ) : null}
             <button 
               className="text-red-600 hover:text-red-900"
@@ -115,11 +125,19 @@ const DataRow = ({
             <Download className="w-4 h-4" />
           </button>
           <button 
-            className="text-purple-600 hover:text-purple-900"
-            onClick={() => handlePreview(dataset.id)}
+            className={`text-purple-600 hover:text-purple-900 relative`}
+            disabled={previewLoading}
+            onClick={async () => {
+              setPreviewLoading(true);
+              handlePreview(dataset.id);
+            }}
             title="Preview Dataset"
           >
-            <Eye className="w-4 h-4" />
+            {previewLoading ? (
+              <LoadingSpinner size={16}/>
+            ) : (
+              <Eye className="w-4 h-4" />
+            )}
           </button>
           <button 
             className="text-red-600 hover:text-red-900"

@@ -1,6 +1,6 @@
 // ProcessingView.jsx
 import React from 'react';
-import { Clock } from 'lucide-react';
+import { InfoIcon } from 'lucide-react';
 
 const ProcessingView = ({
   processingMessage,
@@ -46,7 +46,7 @@ const ProcessingView = ({
           </p>
 
           <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
-            <Clock className="w-4 h-4" />
+            <InfoIcon className="w-4 h-4" />
             <span>Job ID: {jobId}</span>
           </div>
 

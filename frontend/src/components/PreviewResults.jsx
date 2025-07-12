@@ -1,6 +1,6 @@
 // PreviewResults.jsx
 import React from 'react';
-import { CheckCircle, AlertCircle } from 'lucide-react';
+import { CheckCircle, AlertCircle, InfoIcon } from 'lucide-react';
 
 const PreviewResults = ({
   processingStatus,
@@ -118,6 +118,10 @@ const PreviewResults = ({
             >
               Close
             </button>
+          </div>
+          <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+            <InfoIcon className="w-4 h-4" />
+            <span>Job ID: {jobId}</span>
           </div>
         </div>
       )}
