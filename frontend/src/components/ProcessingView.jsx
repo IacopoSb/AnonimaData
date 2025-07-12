@@ -1,6 +1,7 @@
 // ProcessingView.jsx
 import React from 'react';
 import { InfoIcon } from 'lucide-react';
+import LoadingSpinner from './LoadingSpinner';
 
 const ProcessingView = ({
   processingMessage,
@@ -26,7 +27,9 @@ const ProcessingView = ({
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
         <div className="text-center">
-          <div className="animate-spin w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-6"></div>
+          <div className='flex justify-center mb-4'>
+          <LoadingSpinner size={64}/>
+          </div>
 
           <h3 className="text-xl font-semibold text-gray-900 mb-2">
             {processingMessage}

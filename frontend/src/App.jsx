@@ -35,8 +35,10 @@ const AnonimaData = () => {
   const [processingMessage, setProcessingMessage] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [currentPreviewFilename, setCurrentPreviewFilename] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadStats = useCallback(async () => {
+    setIsRefreshing(true);
     try {
       const consolidatedData = await getFiles();
       setStats({
@@ -83,6 +85,7 @@ const AnonimaData = () => {
       setStats({ totalDatasets: 0, completedJobs: 0, dataProtected: 0 });
       setDatasets([]);
     }
+    setIsRefreshing(false);
   }, []);
 
   useEffect(() => {
@@ -272,9 +275,6 @@ const handleDeleteRequest = async (jobId, filename) => {
   };
 
   const handleSave = () => {
-    // This function can be simplified as `loadStats` will already update the dashboard
-    // after anonymization completes and polling finishes.
-    // We just need to navigate back to the dashboard.
     setCurrentView('dashboard');
     setAnonymizedPreview(null); // Clear preview once done
     setUploadedFile(null); // Clear uploaded file context
@@ -329,6 +329,7 @@ const handleDeleteRequest = async (jobId, filename) => {
             handleDelete={handleDeleteRequest}
             openJob={startPolling}
             getFiles={getFiles}
+            isLoading={isRefreshing}
           />
         )}
 

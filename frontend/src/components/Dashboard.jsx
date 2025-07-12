@@ -10,11 +10,18 @@ const Dashboard = ({
   setCurrentView,
   loadStats,
   handleDownload,
-  handlePreview,
   handleDelete,
   openJob,
   isLoading
 }) => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadStats();
+    setIsRefreshing(false);
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
@@ -57,7 +64,20 @@ const Dashboard = ({
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Your Anonymized Datasets</h3>
-          {isLoading ? (<LoadingSpinner />) : null}
+          {(isLoading || isRefreshing) ? (
+            <div className="ml-1 p-2 rounded transition flex items-center justify-center" style={{ width: 32, height: 32 }}>
+              <LoadingSpinner size={32} />
+            </div>
+          ) : (
+            <button
+              onClick={handleRefresh}
+              className="ml-1 p-2 rounded hover:bg-gray-100 transition flex items-center justify-center"
+              style={{ width: 32, height: 32 }}
+              title="Refresh"
+            >
+              <RefreshCcw className="w-4 h-4 text-purple-600" />
+            </button>
+          )}
         </div>
 
         {datasets.length === 0 ? (
