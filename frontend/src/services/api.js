@@ -1,5 +1,5 @@
 
-import '../src/firebase';
+//import '../src/firebase';
 import { getAuth } from 'firebase/auth';
 
 
