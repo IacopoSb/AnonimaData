@@ -495,6 +495,9 @@ resource "google_cloud_run_v2_service" "orchestratore" {
         }
       }
     }
+    scaling {
+      max_instance_count = 5
+    }
     timeout = "300s"
     max_instance_request_concurrency = 1000
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
@@ -673,34 +676,6 @@ resource "google_monitoring_dashboard" "cloudrun_dashboard" {
               }]
               yAxis = {
                 label = "Messages/sec"
-                scale = "LINEAR"
-              }
-            }
-          }
-        },
-        # Pub/Sub messaggi ricevuti (tutte le subscription)
-        {
-          width  = 6
-          height = 4
-          xPos   = 0
-          yPos   = 8
-          widget = {
-            title = "Pub/Sub Messages Pulled (All Subscriptions)"
-            xyChart = {
-              dataSets = [{
-                timeSeriesQuery = {
-                  timeSeriesFilter = {
-                    filter = "metric.type=\"pubsub.googleapis.com/subscription/pull_message_operation_count\""
-                    aggregation = {
-                      perSeriesAligner = "ALIGN_RATE"
-                      alignmentPeriod = "60s"
-                    }
-                  }
-                }
-                plotType = "LINE"
-              }]
-              yAxis = {
-                label = "Pulled/sec"
                 scale = "LINEAR"
               }
             }

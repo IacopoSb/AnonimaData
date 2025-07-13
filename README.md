@@ -14,7 +14,7 @@ AnonimaData/
 ├── backend/                # Python microservices for data anonymization workflows
 │   ├── anonymizer/         # Implements anonymization algorithms (k-Anonymity, l-Diversity, etc.)
 │   ├── formatter/          # Handles data formatting and preprocessing
-│   ├── orchestratore/      # Orchestrates workflow and service coordination
+│   └── orchestratore/      # Orchestrates workflow and service coordination
 ├── docs/                   # Project report and ppt (italian language)
 ├── frontend/               # React-based web application for user interaction
 ├── stressTests/            # Scripts for stress testing and performance evaluation
