@@ -13,6 +13,7 @@ import firebase_admin
 from firebase_admin import auth
 from google.cloud import storage
 from sqlalchemy import create_engine, text
+import threading
 
 # Configurations (environment variables)
 DB_HOST = os.environ.get("DB_HOST")
@@ -24,15 +25,17 @@ FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+get_status_lock = threading.Lock()
+
 
 # SQLAlchemy engine with connection pool
 DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
 engine = create_engine(
     DATABASE_URL,
-    pool_size=20,           # Max number of connections in pool
-    max_overflow=30,        # Overflow connections
-    pool_timeout=30,        # Timeout for getting a connection
-    pool_recycle=1800       # Recycle connections every 30 min
+    pool_size=10,
+    max_overflow=8,
+    pool_timeout=30,
+    pool_recycle=1800
 )
 
 def init_db():
@@ -51,7 +54,7 @@ def init_db():
                 upload_at TEXT,
                 completed_at TEXT,
                 status TEXT,
-                error_message TEXT,
+                error_message TEXT
             )
         '''))
         conn.commit()
@@ -208,28 +211,35 @@ def request_anonymization():
 @app.route('/get_status/<job_id>', methods=['GET'])
 @firebase_auth_required
 def get_status(job_id):
-    with engine.connect() as conn:
-        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
-        job = result.mappings().first()
-    
-    if not job:
-        return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
-    if job['user_id'] != request.user_id:
-        return jsonify({'error': 'Unauthorized'}), 403
+    acquired = get_status_lock.acquire(timeout=10)  # Timeout 10 seconds
+    if not acquired:
+        return jsonify({'error': 'busy', 'details': 'Too many clients fetching status, please retry.'}), 429  # Too Many Requests
 
-    response_status = {
-        "job_id": job['job_id'],
-        "filename": job['filename'],
-        "status": job['status'],
-        "upload_at": job['upload_at'],
-        "completed_at": job['completed_at'],
-        "rows": job['rows'],
-        "method": job['method'],
-        "metadata": json.loads(job['metadata']) if job['metadata'] else None,        
-        "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None,
-        "error_message": job['error_message'] if job['error_message'] else None
-    }
-    return jsonify(response_status), 200
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+            job = result.mappings().first()
+        
+        if not job:
+            return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
+        if job['user_id'] != request.user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        response_status = {
+            "job_id": job['job_id'],
+            "filename": job['filename'],
+            "status": job['status'],
+            "upload_at": job['upload_at'],
+            "completed_at": job['completed_at'],
+            "rows": job['rows'],
+            "method": job['method'],
+            "metadata": json.loads(job['metadata']) if job['metadata'] else None,        
+            "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None,
+            "error_message": job['error_message'] if job.get('error_message') else None
+        }
+        return jsonify(response_status), 200
+    finally:
+        get_status_lock.release()
 
 @app.route('/get_files', methods=['GET'])
 @firebase_auth_required
@@ -611,27 +621,35 @@ def noauth_request_anonymization():
 @app.route('/noauth_get_status/<job_id>', methods=['GET'])
 def noauth_get_status(job_id):
     request.user_id = MOCK_USER_ID
-    with engine.connect() as conn:
-        result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
-        job = result.mappings().first()
-    
-    if not job:
-        return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
-    if job['user_id'] != request.user_id:
-        return jsonify({'error': 'Unauthorized'}), 403
+    acquired = get_status_lock.acquire(timeout=10)  # Timeout 10 seconds
+    if not acquired:
+        return jsonify({'error': 'busy', 'details': 'Too many clients fetching status, please retry.'}), 429  # Too Many Requests
 
-    response_status = {
-        "job_id": job['job_id'],
-        "filename": job['filename'],
-        "status": job['status'],
-        "upload_at": job['upload_at'],
-        "completed_at": job['completed_at'],
-        "rows": job['rows'],
-        "method": job['method'],
-        "metadata": json.loads(job['metadata']) if job['metadata'] else None,        
-        "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None
-    }
-    return jsonify(response_status), 200
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT * FROM jobs WHERE job_id = :job_id'), {"job_id": job_id})
+            job = result.mappings().first()
+        
+        if not job:
+            return jsonify({'error': 'not_found', 'details': 'Job ID not found'}), 404
+        if job['user_id'] != request.user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        response_status = {
+            "job_id": job['job_id'],
+            "filename": job['filename'],
+            "status": job['status'],
+            "upload_at": job['upload_at'],
+            "completed_at": job['completed_at'],
+            "rows": job['rows'],
+            "method": job['method'],
+            "metadata": json.loads(job['metadata']) if job['metadata'] else None,        
+            "anonymized_preview": json.loads(job['anonymized_preview']) if job['anonymized_preview'] else None,
+            "error_message": job['error_message'] if job.get('error_message') else None
+        }
+        return jsonify(response_status), 200
+    finally:
+        get_status_lock.release()
 
 @app.route('/noauth_download/<job_id>', methods=['GET'])
 def noauth_download(job_id):
